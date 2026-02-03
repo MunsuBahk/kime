@@ -684,7 +684,8 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for AppState {
                     if let Some(ref im_state) = state.im_v2 {
                         im_state.vk.key(time, key, key_state.into());
                     }
-                } else if !is_pressed {
+                } else {
+                    // is_pressed && !grab_activate - bypass
                     if let Some(ref im_state) = state.im_v2 {
                         im_state.vk.key(time, key, key_state.into());
                     }
@@ -901,8 +902,11 @@ impl Dispatch<WlKeyboard, ()> for AppState {
                             *press_state = PressState::NotPressing;
                         }
                     }
-                    state.key_v1(time, key, KeyState::Released);
+                    if let WEnum::Value(ks) = key_state {
+                        state.key_v1(time, key, ks);
+                    }
                 } else if let WEnum::Value(ks) = key_state {
+                    // is_pressed && !grab_activate - bypass
                     state.key_v1(time, key, ks);
                 }
             }
