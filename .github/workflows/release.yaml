@@ -44,7 +44,9 @@ jobs:
 
       - name: Create archive
         run: |
-          DESTDIR=$(pwd)/kime-install ninja -C build install
+          # run inside nix develop so the cargo rebuild (build_always_stale)
+          # uses nix's rust, not the runner's rustup (which races on rust-src)
+          DESTDIR=$(pwd)/kime-install nix develop -c ninja -C build install
           tar -C kime-install -caf kime-${{ github.ref_name }}.tar.zst .
 
       - name: Upload release
