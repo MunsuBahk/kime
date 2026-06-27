@@ -178,12 +178,19 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update
-          PKGS="build-essential curl git pkg-config libclang-dev meson ninja-build"
+          # NOTE: meson is installed via pip below, not apt: ubuntu 22.04 ships
+          # meson 0.61 and debian bookworm 1.0.1, both older than the >=1.1 the
+          # project requires. ninja still comes from apt.
+          PKGS="build-essential curl git pkg-config libclang-dev ninja-build python3 python3-venv"
           if [ "${{ matrix.gtk3 }}" = "enabled" ]; then PKGS="$PKGS libgtk-3-dev"; fi
           if [ "${{ matrix.gtk4 }}" = "enabled" ]; then PKGS="$PKGS libgtk-4-dev"; fi
           if [ "${{ matrix.qt5 }}" = "enabled" ]; then PKGS="$PKGS qtbase5-dev qtbase5-private-dev"; fi
           if [ "${{ matrix.qt6 }}" = "enabled" ]; then PKGS="$PKGS qt6-base-dev qt6-base-private-dev"; fi
           apt-get install -y $PKGS
+          # modern meson in an isolated venv (avoids PEP668 on bookworm/trixie/24.04)
+          python3 -m venv /opt/mesonenv
+          /opt/mesonenv/bin/pip install --quiet --upgrade pip meson
+          echo "/opt/mesonenv/bin" >> "$GITHUB_PATH"
 
       - name: Install Rust
         run: |
