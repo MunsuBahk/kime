@@ -6,6 +6,12 @@
 
 ### Improve
 
+## 3.2.0
+
+### Breaking
+
+### Improve
+
 * Replace cmake build system with meson
   - cargo builds via `custom_target()`, GTK/Qt frontends as `shared_library()`
   - Per-component build options (gtk3, gtk4, qt5, qt6, check, indicator, etc.), enabled by default
@@ -41,6 +47,18 @@
 * Fix kime-wayland crash on KDE Plasma 6.5.5 by handling KeyState::Repeated
 * Fix indicator tray icon not showing/updating on KDE with tokio async I/O (ksni 0.3.3)
 * Rewrite kime-wayland for wayland-rs 0.31 API (Dispatch trait pattern)
+* fix(xim): degrade gracefully when the preedit font is missing instead of panicking [#706](https://github.com/Riey/kime/issues/706)
+* feat(engine): add `SuperL`/`SuperR` keycodes so Right-Super can be bound as a hotkey [#640](https://github.com/Riey/kime/issues/640)
+* fix(hangul): enable `ComposeJongseongSsang` by default for sebeolsik-3sin-p2 (ㄲ 받침) [#646](https://github.com/Riey/kime/issues/646)
+* fix(latin): repair the malformed Dvorak layout so it parses and works [#626](https://github.com/Riey/kime/issues/626)
+* fix(hangul): Sebeolsik composition bug when typing `v` instead of `/` [#679](https://github.com/Riey/kime/issues/679)
+* Qt6 immodule: append `.5.1` suffix to the plugin IID so it builds without `qt5-base` installed (fixes Arch/AUR build) [#732](https://github.com/Riey/kime/issues/732) [#736](https://github.com/Riey/kime/pull/736)
+* Add `qt5` dependency to fix the frontend build failure on Arch Linux [#724](https://github.com/Riey/kime/pull/724)
+* Release: build Qt6 immodules per-version like Qt5 and add Qt 6.9 / 6.10 to the build matrix [#749](https://github.com/Riey/kime/pull/749)
+* Packaging: include gtk4 and qt6 immodules in the `.deb` packages, including ubuntu-22.04 [#734](https://github.com/Riey/kime/issues/734) [#750](https://github.com/Riey/kime/pull/750)
+* Build Dockerfiles for Ubuntu 24.04 and Debian Bookworm [#726](https://github.com/Riey/kime/pull/726)
+* fix(wayland): prevent text selection deletion on Ctrl/modifier shortcuts [#714](https://github.com/Riey/kime/issues/714) [#718](https://github.com/Riey/kime/pull/718)
+* fix(wayland): bypass key events when input is not activated [#745](https://github.com/Riey/kime/pull/745)
 
 
 ## 3.1.1
