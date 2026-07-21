@@ -12,6 +12,7 @@
 
 ### Improve
 
+* fix(qt6): pass the input context IID define to moc so the Qt6 immodule plugin metadata is generated correctly **[@isac322]** [#756](https://github.com/Riey/kime/pull/756)
 * fix(hangul): revert [#719] — pass keys (layout symbol/number layers such as the sebeolsik shifted right-half) are committed in Hangul mode again instead of being bypassed to the application. Shortcut-modified keys (Ctrl/Alt/Super) have no layout entry and are already passed through by the caller, so the special-case bypass was unnecessary and regressed every Hangul layout. [#754](https://github.com/Riey/kime/issues/754)
 * Replace cmake build system with meson
   - cargo builds via `custom_target()`, GTK/Qt frontends as `shared_library()`
