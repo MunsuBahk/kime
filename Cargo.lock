@@ -1772,6 +1772,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kime-e2e"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "kime-engine-backend"
 version = "0.1.0"
 dependencies = [
