@@ -14,21 +14,29 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, docker-ci]
 
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v18
+      # init: none — the runner is an ephemeral container without systemd.
+      # The first substituter is a local caching proxy for cache.nixos.org;
+      # nix falls back to the real cache if it is unreachable.
+      - uses: DeterminateSystems/nix-installer-action@v22
         with:
-          github_access_token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Caching cargo
+          init: none
+          extra-conf: |
+            substituters = http://172.30.0.251:8080 https://cache.nixos.org
+      - name: Caching cargo and nix inputs
         uses: actions/cache@v4
         with:
+          # ~/.cache/nix holds fetched flake inputs (the nixpkgs tarball
+          # alone costs ~10s per run on the ephemeral runners)
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cache/nix
             target
-          key: ${{ runner.os }}-nix-rustc-v1-1.55.0-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-nix-rustc-v1-1.55.0-${{ hashFiles('Cargo.lock', 'flake.lock') }}
           restore-keys: |
             ${{ runner.os }}-nix-rustc-v1-1.55.0-
       - run: nix develop -c meson setup build --buildtype=debug -Dcargo_profile=debug
@@ -36,28 +44,37 @@ jobs:
       - run: nix develop -c cargo test
 
   cargo-deny:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, docker-ci]
     strategy:
       matrix:
         checks:
           - bans licenses sources
 
+    # cargo-deny-action is a Docker action, which the self-hosted runner
+    # (a container without a docker socket) can't run — install the binary
+    # instead. cargo-deny shells out to `cargo metadata`, hence the toolchain.
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check ${{ matrix.checks }}
 
   format:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, docker-ci]
 
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rustfmt
-        run: rustup component add rustfmt
+      # the runner image has no rustup; this installs it with rustfmt included
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
       - name: Check Rustfmt
         run: cargo fmt -- --check
 
   spell-check:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, docker-ci]
     steps:
       - uses: actions/checkout@v4
       - uses: crate-ci/typos@master
