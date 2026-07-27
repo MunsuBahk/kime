@@ -85,6 +85,10 @@ pub struct AppState {
     serial: u32,
     timer: TimerFd,
     repeat_state: Option<(RepeatInfo, PressState)>,
+    /// `true` when a repeat tick of the currently pressed key was bypassed to
+    /// the client as a synthetic press, i.e. a synthetic press is outstanding.
+    /// Cleared on a new press and on the real key release.
+    repeat_bypassed: bool,
     last_preedit_len: usize,
     should_exit: bool,
 
@@ -115,6 +119,7 @@ impl AppState {
                 },
                 PressState::NotPressing,
             )),
+            repeat_bypassed: false,
             last_preedit_len: 0,
             should_exit: false,
             globals: Globals {
@@ -318,17 +323,35 @@ impl AppState {
 
             // Emit key repeat event
             let elapsed_ms = pressed_at.elapsed().as_millis() as u32;
-            let _time = wayland_time.wrapping_add(elapsed_ms);
+            let time = wayland_time.wrapping_add(elapsed_ms);
 
             // Handle v2
-            if let Some(ref mut im_state) = self.im_v2 {
-                if im_state.grab_activate {
-                    let hwcode = (key + 8) as u16;
-                    if let Some(code) = KeyCode::from_hardware_code(hwcode, self.numlock) {
-                        let ret = self
-                            .engine
-                            .press_key(Key::new(code, self.mod_state), &self.config);
-                        self.process_input_result_v2(ret);
+            let v2_grab_activate = self
+                .im_v2
+                .as_ref()
+                .map(|s| s.grab_activate)
+                .unwrap_or(false);
+            if v2_grab_activate {
+                let hwcode = (key + 8) as u16;
+                if let Some(code) = KeyCode::from_hardware_code(hwcode, self.numlock) {
+                    let ret = self
+                        .engine
+                        .press_key(Key::new(code, self.mod_state), &self.config);
+                    let bypassed = self.process_input_result_v2(ret);
+                    if bypassed {
+                        // The engine no longer consumes the repeats of this key
+                        // (e.g. Backspace after the preedit is emptied), so keep
+                        // repeating it for the client ourselves. Send a release
+                        // before every press after the first so the client sees
+                        // one keystroke per tick instead of a held key that
+                        // would restart its own delayed repeat.
+                        if let Some(ref im_state) = self.im_v2 {
+                            if self.repeat_bypassed {
+                                im_state.vk.key(time, key, KeyState::Released as u32);
+                            }
+                            im_state.vk.key(time, key, KeyState::Pressed as u32);
+                        }
+                        self.repeat_bypassed = true;
                     }
                 }
             }
@@ -345,7 +368,14 @@ impl AppState {
                     let ret = self
                         .engine
                         .press_key(Key::new(code, self.mod_state), &self.config);
-                    self.process_input_result_v1(ret);
+                    let bypassed = self.process_input_result_v1(ret);
+                    if bypassed {
+                        if self.repeat_bypassed {
+                            self.key_v1(time, key, KeyState::Released);
+                        }
+                        self.key_v1(time, key, KeyState::Pressed);
+                        self.repeat_bypassed = true;
+                    }
                 }
             }
         }
@@ -363,6 +393,8 @@ impl AppState {
         }
 
         if let Some(ref im_state) = self.im_v2 {
+            let mut state_changed = false;
+
             if ret.contains(InputResult::HAS_PREEDIT) {
                 let preedit = self.engine.preedit_str();
                 let len = preedit.len();
@@ -370,20 +402,31 @@ impl AppState {
                     .im
                     .set_preedit_string(preedit.into(), 0, len as i32);
                 self.last_preedit_len = len;
+                state_changed = true;
             } else if self.last_preedit_len > 0 {
                 im_state.im.set_preedit_string(String::new(), -1, -1);
                 self.last_preedit_len = 0;
+                state_changed = true;
             }
 
             if ret.contains(InputResult::HAS_COMMIT) {
                 let commit_str = self.engine.commit_str();
                 if !commit_str.is_empty() {
                     im_state.im.commit_string(commit_str.into());
+                    state_changed = true;
                 }
                 self.engine.clear_commit();
             }
 
-            im_state.im.commit(self.serial);
+            // Only send `commit` when we actually changed the pending state.
+            // Under the double-buffered input-method-v2 -> text-input-v3
+            // semantics a bare `commit` applies an "empty preedit, no commit
+            // string" state and yields a spurious `done` at the client, which
+            // Firefox/Chromium interpret as an empty composition that replaces
+            // the current selection (issue #714).
+            if state_changed {
+                im_state.im.commit(self.serial);
+            }
         }
 
         !ret.contains(InputResult::CONSUMED)
@@ -592,6 +635,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for AppState {
                     if let Some((_, ref mut ps)) = state.repeat_state {
                         *ps = PressState::NotPressing;
                     }
+                    state.repeat_bypassed = false;
                 }
 
                 if let Some(ref mut im_state) = state.im_v2 {
@@ -668,6 +712,7 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for AppState {
                                         key,
                                         wayland_time: time,
                                     };
+                                    state.repeat_bypassed = false;
                                 }
                             }
                         }
@@ -679,6 +724,9 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for AppState {
                         if press_state.is_pressing(key) {
                             let _ = state.timer.set_timeout_oneshot(Duration::ZERO);
                             *press_state = PressState::NotPressing;
+                            // The release below balances any synthetic press
+                            // emitted for a bypassed repeat tick.
+                            state.repeat_bypassed = false;
                         }
                     }
                     if let Some(ref im_state) = state.im_v2 {
@@ -781,6 +829,7 @@ impl Dispatch<ZwpInputMethodV1, ()> for AppState {
                 if let Some((_, ref mut press_state)) = state.repeat_state {
                     *press_state = PressState::NotPressing;
                 }
+                state.repeat_bypassed = false;
 
                 im_ctx.destroy();
 
@@ -889,6 +938,7 @@ impl Dispatch<WlKeyboard, ()> for AppState {
                                         key,
                                         wayland_time: time,
                                     };
+                                    state.repeat_bypassed = false;
                                 }
                             }
                         }
@@ -900,6 +950,9 @@ impl Dispatch<WlKeyboard, ()> for AppState {
                         if press_state.is_pressing(key) {
                             let _ = state.timer.set_timeout_oneshot(Duration::ZERO);
                             *press_state = PressState::NotPressing;
+                            // The release below balances any synthetic press
+                            // emitted for a bypassed repeat tick.
+                            state.repeat_bypassed = false;
                         }
                     }
                     if let WEnum::Value(ks) = key_state {
