@@ -29,11 +29,11 @@ Arch package names (the suite was developed against these):
 | Qt probes | `qt5-base`, `qt6-base`, `qt6-wayland` (Q-02 only) |
 | Software GL for the candidate popup | `mesa` (llvmpipe) |
 
-**nix devshell gap:** `shell.nix` currently provides only the build
-toolchain — it has none of the runtime tools above (sway, Xvfb, xdotool,
-python-gobject, qt6-wayland, …). Until they are added to `nix/deps.nix`, run
-the suite from a host shell with the packages installed, not from
-`nix develop`. (Adding them + a label-gated CI job is the planned follow-up.)
+**nix devshell:** `nix develop` provides all of the above
+(`kimeE2eBuildInputs` / `kimeE2eNativeBuildInputs` in `nix/deps.nix`) except
+Qt5 — nixpkgs refuses Qt5 and Qt6 in one environment, so that build has no
+qt5 plugin and `q5_smoke` skips. This is the environment CI runs the suite
+in; see the `e2e` job in `.github/workflows/ci.yaml`.
 
 ## Building the artifacts under test
 
@@ -73,6 +73,13 @@ Env overrides:
 | `KIME_E2E_BUILD_DIR` | `<repo>/build` | meson build dir (immodules) |
 | `KIME_E2E_TARGET_DIR` | `<repo>/target/debug` | cargo output dir (binaries + engine .so) |
 | `KIME_E2E_KEEP_LOGS=1` | unset | keep per-test scratch dirs even on success |
+| `KIME_E2E_PASS_ENV` | unset | comma-separated names to forward through the `env_clear` allowlist |
+
+`KIME_E2E_PASS_ENV` exists for environments that keep their GTK/Qt/GL
+runtime off the paths those libraries search by default: `shell.nix` sets it
+to hand probes `GI_TYPELIB_PATH`, `LIBGL_DRIVERS_PATH`, `FONTCONFIG_FILE`
+and friends. Never list session state (`DISPLAY`, `WAYLAND_DISPLAY`,
+`*_IM_MODULE`) — the allowlist drops those on purpose.
 
 Do not run two instances of the suite from the same checkout at once: they
 share `target/e2e/` (scratch dirs) and `target/e2e-clients/` (compiled probe
