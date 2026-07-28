@@ -8,9 +8,10 @@ on:
   pull_request:
     branches:
       - "develop"
-      # Stacked fix PRs (#786-#789) target the e2e branch so their CI shows
-      # the guarded e2e test flip red->green; drop this entry when #776 merges.
-      - "e2e-gui-tests"
+      # Convention: branches under bases/ serve as PR base branches for
+      # stacked work (e.g. fix PRs targeting the e2e suite branch so their
+      # CI shows the guarded e2e test flip red->green).
+      - "bases/*"
 
 # A superseded push cancels the older PR run so it stops occupying the
 # 4-slot docker-ci pool; pushes to develop always run to completion.
