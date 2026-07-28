@@ -18,6 +18,7 @@
 * fix(engine): reap the candidate window process after killing it so dismissed hanja popups no longer accumulate as zombie (`<defunct>`) processes [#617](https://github.com/Riey/kime/issues/617) [#769](https://github.com/Riey/kime/pull/769)
 * fix(engine): log config file open/parse errors instead of silently falling back to the default config, so a syntax error in `config.yaml` is diagnosable [#656](https://github.com/Riey/kime/issues/656) [#769](https://github.com/Riey/kime/pull/769)
 * feat(engine): layout files support an optional `version:`/`keys:` format — files declaring a format version newer than kime supports are rejected with a clear error instead of breaking silently on a future format change, legacy flat-map layouts keep working unchanged, and user layout files that fail to load are logged with the reason instead of silently skipped [#540](https://github.com/Riey/kime/issues/540) [#774](https://github.com/Riey/kime/pull/774)
+* fix(engine): dismissing the hanja candidate window with a global hotkey no longer leaks the popup process — Esc, the hangul/latin toggles and the emoji/math mode hotkeys all stay active in hanja mode, and they cleared the input mode without closing its candidate window, leaving `kime-candidate-window` running (and later `<defunct>`) [#780](https://github.com/Riey/kime/issues/780) [#787](https://github.com/Riey/kime/pull/787)
 
 ## 3.2.0
 
