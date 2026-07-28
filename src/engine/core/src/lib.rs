@@ -48,7 +48,7 @@ impl InputEngine {
     pub fn set_input_category(&mut self, category: InputCategory) {
         // Reset previous engine
         self.engine_impl.clear_preedit(&mut self.commit_buf);
-        self.engine_impl.mode = None;
+        self.engine_impl.leave_mode();
         self.engine_impl.category = category;
     }
 
@@ -291,6 +291,31 @@ impl EngineImpl {
         }
     }
 
+    /// Leave the current mode, giving it a chance to release what it owns.
+    ///
+    /// `mode` must never be cleared or replaced without this: `HanjaMode`
+    /// holds the `kime-candidate-window` child process and only its `reset`
+    /// closes it (`Client::close` kills and reaps), so dropping the mode
+    /// alone orphans the popup — it stays on screen and later turns into a
+    /// defunct process.
+    fn leave_mode(&mut self) {
+        match self.mode.take() {
+            #[cfg(feature = "hanja")]
+            Some(InputMode::Hanja) => {
+                self.hanja_mode.reset();
+            }
+            #[cfg(feature = "math")]
+            Some(InputMode::Math) => {
+                self.math_mode.reset();
+            }
+            #[cfg(feature = "emoji")]
+            Some(InputMode::Emoji) => {
+                self.emoji_mode.reset();
+            }
+            _ => {}
+        }
+    }
+
     pub fn set_mode(
         &mut self,
         mode: InputMode,
@@ -300,6 +325,7 @@ impl EngineImpl {
         match mode {
             InputMode::Math | InputMode::Emoji => {
                 self.clear_preedit(commit_buf);
+                self.leave_mode();
                 self.mode = Some(mode);
                 true
             }
