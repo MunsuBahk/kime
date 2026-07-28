@@ -109,7 +109,10 @@ pub struct AppState {
     /// the client as a synthetic press, i.e. a synthetic press is outstanding.
     /// Cleared on a new press and on the real key release.
     repeat_bypassed: bool,
-    last_preedit_len: usize,
+    /// The preedit string last sent to the client, empty when the client has
+    /// no preedit. Reset whenever a text input is activated or deactivated,
+    /// since the client drops its preedit with the old context.
+    last_preedit: String,
     should_exit: bool,
 
     // Wayland state
@@ -140,7 +143,7 @@ impl AppState {
                 PressState::NotPressing,
             )),
             repeat_bypassed: false,
-            last_preedit_len: 0,
+            last_preedit: String::new(),
             should_exit: false,
             globals: Globals {
                 seat: None,
@@ -413,40 +416,61 @@ impl AppState {
         }
 
         if let Some(ref im_state) = self.im_v2 {
-            let mut state_changed = false;
+            // `commit_str()`/`preedit_str()` are zero-copy borrows from the
+            // engine: the whole should-we-send decision runs on them, so a key
+            // that changes nothing (lone modifiers, volume keys, ... bypassed
+            // while composing — the engine still reports `HAS_PREEDIT` for
+            // those) allocates nothing and sends nothing (issue #781). Owned
+            // strings are made only for the protocol calls that demand them.
+            //
+            // `preedit_str` rebuilds into the engine's buffer under `&mut`, so
+            // its borrow cannot overlap `commit_str`'s — the commit text is
+            // therefore only borrowed right at its protocol call.
+            // HAS_COMMIT is set iff the commit buffer is non-empty
+            // (InputEngine::current_result), so the flag alone decides.
+            let has_commit = ret.contains(InputResult::HAS_COMMIT);
+            let preedit = if ret.contains(InputResult::HAS_PREEDIT) {
+                self.engine.preedit_str()
+            } else {
+                ""
+            };
 
-            if ret.contains(InputResult::HAS_PREEDIT) {
-                let preedit = self.engine.preedit_str();
-                let len = preedit.len();
-                im_state
-                    .im
-                    .set_preedit_string(preedit.into(), 0, len as i32);
-                self.last_preedit_len = len;
-                state_changed = true;
-            } else if self.last_preedit_len > 0 {
-                im_state.im.set_preedit_string(String::new(), -1, -1);
-                self.last_preedit_len = 0;
-                state_changed = true;
-            }
-
-            if ret.contains(InputResult::HAS_COMMIT) {
-                let commit_str = self.engine.commit_str();
-                if !commit_str.is_empty() {
-                    im_state.im.commit_string(commit_str.into());
-                    state_changed = true;
+            // A transaction is sent only when it carries something new. Text
+            // to commit always does; a preedit only when it differs from the
+            // one the client already shows — but an unchanged preedit is
+            // staged again whenever there is a commit string: `commit` resets
+            // the pending state, so the preedit has to be part of every
+            // transaction that survives it.
+            if has_commit || preedit != self.last_preedit {
+                if !preedit.is_empty() {
+                    im_state
+                        .im
+                        .set_preedit_string(preedit.into(), 0, preedit.len() as i32);
+                } else if !self.last_preedit.is_empty() {
+                    im_state.im.set_preedit_string(String::new(), -1, -1);
                 }
-                self.engine.clear_commit();
-            }
 
-            // Only send `commit` when we actually changed the pending state.
-            // Under the double-buffered input-method-v2 -> text-input-v3
-            // semantics a bare `commit` applies an "empty preedit, no commit
-            // string" state and yields a spurious `done` at the client, which
-            // Firefox/Chromium interpret as an empty composition that replaces
-            // the current selection (issue #714).
-            if state_changed {
+                // Remember what the client will show, reusing the buffer.
+                // Also the last use of `preedit`, releasing the engine borrow.
+                self.last_preedit.clear();
+                self.last_preedit.push_str(preedit);
+
+                if has_commit {
+                    im_state.im.commit_string(self.engine.commit_str().into());
+                }
+
+                // Under the double-buffered input-method-v2 -> text-input-v3
+                // semantics a bare `commit` applies an "empty preedit, no
+                // commit string" state and yields a spurious `done` at the
+                // client, which Firefox/Chromium interpret as an empty
+                // composition that replaces the current selection (issue
+                // #714), so `commit` is only ever sent with state above it.
                 im_state.im.commit(self.serial);
             }
+        }
+
+        if ret.contains(InputResult::HAS_COMMIT) {
+            self.engine.clear_commit();
         }
 
         !ret.contains(InputResult::CONSUMED)
@@ -463,31 +487,58 @@ impl AppState {
 
         if let Some(ref im_state) = self.im_v1 {
             if let Some(ref im_ctx) = im_state.im_ctx {
-                if ret.contains(InputResult::HAS_COMMIT) {
-                    let commit_str = self.engine.commit_str();
-                    if !commit_str.is_empty() {
-                        im_ctx.commit_string(self.serial, commit_str.into());
-                    }
-                    self.engine.clear_commit();
-                }
+                // Zero-copy borrows with the same discipline as the v2 path.
+                // v1 must send `commit_string` (which clears the client's
+                // preedit) BEFORE re-sending the preedit, so the preedit is
+                // borrowed twice: once for the decision, once for the send —
+                // still no allocation on the nothing-changed path.
+                // HAS_COMMIT implies a non-empty commit buffer, as in v2.
+                let has_commit = ret.contains(InputResult::HAS_COMMIT);
+                let preedit_changed = {
+                    let preedit = if ret.contains(InputResult::HAS_PREEDIT) {
+                        self.engine.preedit_str()
+                    } else {
+                        ""
+                    };
+                    preedit != self.last_preedit
+                };
 
-                if ret.contains(InputResult::HAS_PREEDIT) {
-                    let preedit = self.engine.preedit_str();
-                    let len = preedit.len();
-                    im_ctx.preedit_cursor(len as i32);
-                    im_ctx.preedit_styling(
-                        0,
-                        len as u32,
-                        ZWP_TEXT_INPUT_V1_PREEDIT_STYLE_UNDERLINE,
-                    );
-                    im_ctx.preedit_string(self.serial, preedit.to_string(), preedit.into());
-                    self.last_preedit_len = len;
-                } else if self.last_preedit_len > 0 {
-                    im_ctx.preedit_cursor(0);
-                    im_ctx.preedit_string(self.serial, String::new(), String::new());
-                    self.last_preedit_len = 0;
+                // Same rule as the v2 path: skip a preedit identical to the one
+                // the client already shows (issue #781), but always re-send it
+                // together with a commit string, which clears the preedit at
+                // the client.
+                if has_commit || preedit_changed {
+                    if has_commit {
+                        im_ctx.commit_string(self.serial, self.engine.commit_str().into());
+                    }
+
+                    let preedit = if ret.contains(InputResult::HAS_PREEDIT) {
+                        self.engine.preedit_str()
+                    } else {
+                        ""
+                    };
+                    if !preedit.is_empty() {
+                        let len = preedit.len();
+                        im_ctx.preedit_cursor(len as i32);
+                        im_ctx.preedit_styling(
+                            0,
+                            len as u32,
+                            ZWP_TEXT_INPUT_V1_PREEDIT_STYLE_UNDERLINE,
+                        );
+                        im_ctx.preedit_string(self.serial, preedit.into(), preedit.into());
+                    } else if !self.last_preedit.is_empty() {
+                        im_ctx.preedit_cursor(0);
+                        im_ctx.preedit_string(self.serial, String::new(), String::new());
+                    }
+
+                    self.last_preedit.clear();
+                    self.last_preedit.push_str(preedit);
                 }
             }
+        }
+
+        if ret.contains(InputResult::HAS_COMMIT) {
+            self.engine.clear_commit();
         }
 
         !ret.contains(InputResult::CONSUMED)
@@ -635,6 +686,9 @@ impl Dispatch<ZwpInputMethodV2, ()> for AppState {
                 };
 
                 if should_activate {
+                    // The text input starts out with no preedit, so nothing we
+                    // sent to the previous one may suppress the next preedit.
+                    state.last_preedit.clear();
                     state.engine.update_layout_state().ok();
                     if !state.engine_ready && state.engine.check_ready() {
                         let ret = state.engine.end_ready();
@@ -648,6 +702,7 @@ impl Dispatch<ZwpInputMethodV2, ()> for AppState {
                     if state.engine_ready {
                         state.engine.reset();
                     }
+                    state.last_preedit.clear();
                     if let Some(ref mut im_state) = state.im_v2 {
                         im_state.grab_activate = false;
                     }
@@ -833,6 +888,8 @@ impl Dispatch<ZwpInputMethodV1, ()> for AppState {
         match event {
             zwp_input_method_v1::Event::Activate { id: im_ctx } => {
                 log::trace!("input_method_v1: Activate");
+                // Fresh context: it shows no preedit yet.
+                state.last_preedit.clear();
                 state.engine.update_layout_state().ok();
                 if !state.engine_ready && state.engine.check_ready() {
                     let ret = state.engine.end_ready();
@@ -854,6 +911,7 @@ impl Dispatch<ZwpInputMethodV1, ()> for AppState {
                 if state.engine_ready {
                     state.engine.reset();
                 }
+                state.last_preedit.clear();
 
                 // Stop repeating
                 let _ = state.timer.set_timeout_oneshot(Duration::ZERO);
