@@ -67,6 +67,26 @@ struct InputMethodV2State {
     keymap_init: bool,
 }
 
+impl InputMethodV2State {
+    /// Forward a key to the virtual keyboard, unless no keymap was uploaded to
+    /// it yet — the compositor rejects keys before a keymap with a protocol
+    /// error, and a seat whose keyboard has no keymap produces no real keys
+    /// anyway. See the `Keymap` event handler for how that happens.
+    fn vk_key(&self, time: u32, key: u32, key_state: u32) {
+        if self.keymap_init {
+            self.vk.key(time, key, key_state);
+        }
+    }
+
+    /// Forward a modifier state to the virtual keyboard; rejected before a
+    /// keymap just like [`Self::vk_key`].
+    fn vk_modifiers(&self, depressed: u32, latched: u32, locked: u32, group: u32) {
+        if self.keymap_init {
+            self.vk.modifiers(depressed, latched, locked, group);
+        }
+    }
+}
+
 /// Input method v1 state
 struct InputMethodV1State {
     im_ctx: Option<ZwpInputMethodContextV1>,
@@ -350,9 +370,9 @@ impl AppState {
                         // would restart its own delayed repeat.
                         if let Some(ref im_state) = self.im_v2 {
                             if self.repeat_bypassed {
-                                im_state.vk.key(time, key, KeyState::Released as u32);
+                                im_state.vk_key(time, key, KeyState::Released as u32);
                             }
-                            im_state.vk.key(time, key, KeyState::Pressed as u32);
+                            im_state.vk_key(time, key, KeyState::Pressed as u32);
                         }
                         self.repeat_bypassed = true;
                     }
@@ -695,8 +715,21 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for AppState {
             zwp_input_method_keyboard_grab_v2::Event::Keymap { format, fd, size } => {
                 if let Some(ref mut im_state) = state.im_v2 {
                     if !im_state.keymap_init {
-                        im_state.vk.keymap(format.into(), fd.as_fd(), size);
-                        im_state.keymap_init = true;
+                        // A seat whose keyboard has no keymap is reported as
+                        // `no_keymap` with size 0. The virtual keyboard can't mmap
+                        // that, so forwarding it kills the connection; wait for a
+                        // real keymap instead, which the compositor sends once the
+                        // seat has a keyboard with one.
+                        if matches!(format, WEnum::Value(KeymapFormat::XkbV1)) && size > 0 {
+                            im_state.vk.keymap(format.into(), fd.as_fd(), size);
+                            im_state.keymap_init = true;
+                        } else {
+                            log::debug!(
+                                "Ignoring empty keymap (format={:?}, size={})",
+                                format,
+                                size
+                            );
+                        }
                     }
                 }
             }
@@ -727,7 +760,7 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for AppState {
 
                         if bypassed {
                             if let Some(ref im_state) = state.im_v2 {
-                                im_state.vk.key(time, key, key_state.into());
+                                im_state.vk_key(time, key, key_state.into());
                             }
                         } else {
                             // Handle key repeat
@@ -748,7 +781,7 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for AppState {
                             }
                         }
                     } else if let Some(ref im_state) = state.im_v2 {
-                        im_state.vk.key(time, key, key_state.into());
+                        im_state.vk_key(time, key, key_state.into());
                     }
                 } else if matches!(key_state, WEnum::Value(KeyState::Released)) {
                     if let Some((.., ref mut press_state)) = state.repeat_state {
@@ -761,12 +794,12 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for AppState {
                         }
                     }
                     if let Some(ref im_state) = state.im_v2 {
-                        im_state.vk.key(time, key, key_state.into());
+                        im_state.vk_key(time, key, key_state.into());
                     }
                 } else {
                     // is_pressed && !grab_activate - bypass
                     if let Some(ref im_state) = state.im_v2 {
-                        im_state.vk.key(time, key, key_state.into());
+                        im_state.vk_key(time, key, key_state.into());
                     }
                 }
             }
@@ -793,9 +826,7 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for AppState {
                 state.numlock = mods_depressed & 0x10 != 0;
 
                 if let Some(ref im_state) = state.im_v2 {
-                    im_state
-                        .vk
-                        .modifiers(mods_depressed, mods_latched, mods_locked, group);
+                    im_state.vk_modifiers(mods_depressed, mods_latched, mods_locked, group);
                 }
             }
             zwp_input_method_keyboard_grab_v2::Event::RepeatInfo { rate, delay } => {
