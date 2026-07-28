@@ -424,10 +424,11 @@ impl AppState {
             // strings are made only for the protocol calls that demand them.
             //
             // `preedit_str` rebuilds into the engine's buffer under `&mut`, so
-            // its borrow cannot overlap `commit_str`'s: the commit text is
-            // read in short, separate borrows instead.
-            let has_commit =
-                ret.contains(InputResult::HAS_COMMIT) && !self.engine.commit_str().is_empty();
+            // its borrow cannot overlap `commit_str`'s — the commit text is
+            // therefore only borrowed right at its protocol call.
+            // HAS_COMMIT is set iff the commit buffer is non-empty
+            // (InputEngine::current_result), so the flag alone decides.
+            let has_commit = ret.contains(InputResult::HAS_COMMIT);
             let preedit = if ret.contains(InputResult::HAS_PREEDIT) {
                 self.engine.preedit_str()
             } else {
@@ -491,8 +492,8 @@ impl AppState {
                 // preedit) BEFORE re-sending the preedit, so the preedit is
                 // borrowed twice: once for the decision, once for the send —
                 // still no allocation on the nothing-changed path.
-                let has_commit =
-                    ret.contains(InputResult::HAS_COMMIT) && !self.engine.commit_str().is_empty();
+                // HAS_COMMIT implies a non-empty commit buffer, as in v2.
+                let has_commit = ret.contains(InputResult::HAS_COMMIT);
                 let preedit_changed = {
                     let preedit = if ret.contains(InputResult::HAS_PREEDIT) {
                         self.engine.preedit_str()
