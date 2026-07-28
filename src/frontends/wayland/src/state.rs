@@ -416,39 +416,46 @@ impl AppState {
         }
 
         if let Some(ref im_state) = self.im_v2 {
-            let commit_str: String = if ret.contains(InputResult::HAS_COMMIT) {
-                let commit_str = self.engine.commit_str().into();
-                self.engine.clear_commit();
-                commit_str
+            // `commit_str()`/`preedit_str()` are zero-copy borrows from the
+            // engine: the whole should-we-send decision runs on them, so a key
+            // that changes nothing (lone modifiers, volume keys, ... bypassed
+            // while composing — the engine still reports `HAS_PREEDIT` for
+            // those) allocates nothing and sends nothing (issue #781). Owned
+            // strings are made only for the protocol calls that demand them.
+            //
+            // `preedit_str` rebuilds into the engine's buffer under `&mut`, so
+            // its borrow cannot overlap `commit_str`'s: the commit text is
+            // read in short, separate borrows instead.
+            let has_commit =
+                ret.contains(InputResult::HAS_COMMIT) && !self.engine.commit_str().is_empty();
+            let preedit = if ret.contains(InputResult::HAS_PREEDIT) {
+                self.engine.preedit_str()
             } else {
-                String::new()
-            };
-            let preedit: String = if ret.contains(InputResult::HAS_PREEDIT) {
-                self.engine.preedit_str().into()
-            } else {
-                String::new()
+                ""
             };
 
-            // Send a transaction only when it carries something new. Text to
-            // commit always does; a preedit only when it differs from the one
-            // the client already shows. The engine keeps reporting
-            // `HAS_PREEDIT` for keys it bypasses (lone modifiers, volume keys,
-            // ...) so without this an identical preedit would be re-sent once
-            // per bypassed key press while composing (issue #781).
-            //
-            // Note the preedit is staged again even when unchanged if there is
-            // a commit string: `commit` resets the pending state, so the
-            // preedit has to be part of every transaction that survives it.
-            if !commit_str.is_empty() || preedit != self.last_preedit {
+            // A transaction is sent only when it carries something new. Text
+            // to commit always does; a preedit only when it differs from the
+            // one the client already shows — but an unchanged preedit is
+            // staged again whenever there is a commit string: `commit` resets
+            // the pending state, so the preedit has to be part of every
+            // transaction that survives it.
+            if has_commit || preedit != self.last_preedit {
                 if !preedit.is_empty() {
-                    let len = preedit.len() as i32;
-                    im_state.im.set_preedit_string(preedit.clone(), 0, len);
+                    im_state
+                        .im
+                        .set_preedit_string(preedit.into(), 0, preedit.len() as i32);
                 } else if !self.last_preedit.is_empty() {
                     im_state.im.set_preedit_string(String::new(), -1, -1);
                 }
 
-                if !commit_str.is_empty() {
-                    im_state.im.commit_string(commit_str);
+                // Remember what the client will show, reusing the buffer.
+                // Also the last use of `preedit`, releasing the engine borrow.
+                self.last_preedit.clear();
+                self.last_preedit.push_str(preedit);
+
+                if has_commit {
+                    im_state.im.commit_string(self.engine.commit_str().into());
                 }
 
                 // Under the double-buffered input-method-v2 -> text-input-v3
@@ -458,8 +465,11 @@ impl AppState {
                 // composition that replaces the current selection (issue
                 // #714), so `commit` is only ever sent with state above it.
                 im_state.im.commit(self.serial);
-                self.last_preedit = preedit;
             }
+        }
+
+        if ret.contains(InputResult::HAS_COMMIT) {
+            self.engine.clear_commit();
         }
 
         !ret.contains(InputResult::CONSUMED)
@@ -476,28 +486,36 @@ impl AppState {
 
         if let Some(ref im_state) = self.im_v1 {
             if let Some(ref im_ctx) = im_state.im_ctx {
-                let commit_str: String = if ret.contains(InputResult::HAS_COMMIT) {
-                    let commit_str = self.engine.commit_str().into();
-                    self.engine.clear_commit();
-                    commit_str
-                } else {
-                    String::new()
-                };
-                let preedit: String = if ret.contains(InputResult::HAS_PREEDIT) {
-                    self.engine.preedit_str().into()
-                } else {
-                    String::new()
+                // Zero-copy borrows with the same discipline as the v2 path.
+                // v1 must send `commit_string` (which clears the client's
+                // preedit) BEFORE re-sending the preedit, so the preedit is
+                // borrowed twice: once for the decision, once for the send —
+                // still no allocation on the nothing-changed path.
+                let has_commit =
+                    ret.contains(InputResult::HAS_COMMIT) && !self.engine.commit_str().is_empty();
+                let preedit_changed = {
+                    let preedit = if ret.contains(InputResult::HAS_PREEDIT) {
+                        self.engine.preedit_str()
+                    } else {
+                        ""
+                    };
+                    preedit != self.last_preedit
                 };
 
                 // Same rule as the v2 path: skip a preedit identical to the one
                 // the client already shows (issue #781), but always re-send it
                 // together with a commit string, which clears the preedit at
                 // the client.
-                if !commit_str.is_empty() || preedit != self.last_preedit {
-                    if !commit_str.is_empty() {
-                        im_ctx.commit_string(self.serial, commit_str);
+                if has_commit || preedit_changed {
+                    if has_commit {
+                        im_ctx.commit_string(self.serial, self.engine.commit_str().into());
                     }
 
+                    let preedit = if ret.contains(InputResult::HAS_PREEDIT) {
+                        self.engine.preedit_str()
+                    } else {
+                        ""
+                    };
                     if !preedit.is_empty() {
                         let len = preedit.len();
                         im_ctx.preedit_cursor(len as i32);
@@ -506,15 +524,20 @@ impl AppState {
                             len as u32,
                             ZWP_TEXT_INPUT_V1_PREEDIT_STYLE_UNDERLINE,
                         );
-                        im_ctx.preedit_string(self.serial, preedit.clone(), preedit.clone());
+                        im_ctx.preedit_string(self.serial, preedit.into(), preedit.into());
                     } else if !self.last_preedit.is_empty() {
                         im_ctx.preedit_cursor(0);
                         im_ctx.preedit_string(self.serial, String::new(), String::new());
                     }
 
-                    self.last_preedit = preedit;
+                    self.last_preedit.clear();
+                    self.last_preedit.push_str(preedit);
                 }
             }
+        }
+
+        if ret.contains(InputResult::HAS_COMMIT) {
+            self.engine.clear_commit();
         }
 
         !ret.contains(InputResult::CONSUMED)
