@@ -292,6 +292,22 @@ impl<C: HasConnection> ServerHandler<X11rbServer<C>> for KimeHandler {
     ) -> Result<(), xim::ServerError> {
         log::debug!("spot: {:?}", user_ic.ic.preedit_spot());
 
+        // A PREEDIT_CALLBACKS client draws the preedit inside its own widget,
+        // so the spot location tells us nothing we have to act on — and
+        // redrawing here is what starts the echo loop of #783. Re-sending the
+        // preedit moves the client's cursor, the client reports the new spot
+        // with another SetICValues, and we redraw again: GTK3's XIM immodule
+        // spins between the with-preedit and without-preedit spot at thousands
+        // of round trips per second and never commits. Only the server-drawn
+        // popup has to follow the spot.
+        if user_ic
+            .ic
+            .input_style()
+            .contains(InputStyle::PREEDIT_CALLBACKS)
+        {
+            return Ok(());
+        }
+
         self.clear_preedit(server, user_ic)?;
         self.preedit(server, user_ic)?;
 
