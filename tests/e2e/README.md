@@ -54,17 +54,27 @@ every kime process runs with `LD_LIBRARY_PATH` pointing at `target/debug`
 ## Running
 
 ```sh
-# everything (serial — required, tests own displays and sockets):
-cargo test -p kime-e2e -- --ignored --test-threads=1
+# everything (parallel — cargo-nextest, one process per test; ~16s):
+cargo nextest run -p kime-e2e --run-ignored ignored-only
 # or, rebuild first:
 tests/e2e/run.sh
 
 # one frontend:
-cargo test -p kime-e2e --test wayland -- --ignored --test-threads=1
+cargo nextest run -p kime-e2e --run-ignored ignored-only -E 'binary(wayland)'
 
 # one test:
-cargo test -p kime-e2e --test wayland -- --ignored w01_714_no_spurious_commit
+cargo nextest run -p kime-e2e --run-ignored ignored-only w01_714_no_spurious_commit
+
+# serial fallback without nextest (slow, ~80s+):
+cargo test -p kime-e2e -- --ignored --test-threads=1
 ```
+
+Every test owns its display (a fresh sway socket or probed Xvfb `:N`), its
+scratch dir and its processes, so tests parallelize safely; nextest's
+per-test *process* isolation is what makes that robust (plain `cargo test`
+must stay serial). `.config/nextest.toml` turns fail-fast off — several
+tests are red by design until their fix PRs merge — and kills any test
+wedged past its slow-timeout.
 
 Env overrides:
 
@@ -131,8 +141,8 @@ A typical Wayland test: `SwaySession` → `VkbdInjector` → `KimeWayland`
 (per-test `XDG_CONFIG_HOME`, `WAYLAND_DEBUG=1` trace) → GTK4 text-input-v3
 probe → inject evdev codes → assert buffer/preedit/protocol trace. A typical
 X11 test: `XvfbSession` → staged immodule or `kime-xim` → probe → `xdotool`.
-Teardown is RAII by exact pid in reverse order; tests must be run with
-`--test-threads=1`.
+Teardown is RAII by exact pid in reverse order. Under nextest each test is
+its own process; under plain `cargo test` use `--test-threads=1`.
 
 ## Adding a test
 

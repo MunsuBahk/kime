@@ -109,11 +109,12 @@ jobs:
           rm -rf target/e2e target/e2e-clients
           mkdir -p target/e2e
           set -o pipefail
-          # --no-fail-fast: one red frontend must not hide the others, and
-          # several tests are red by design until their fix PR merges
-          # (tests/e2e/README.md, tracker #777)
-          nix develop "$DEVSHELL" -c cargo test -p kime-e2e --no-fail-fast \
-            -- --ignored --test-threads=1 2>&1 | tee target/e2e/cargo-test.log
+          # nextest: parallel, one process per test, wedged tests killed —
+          # fail-fast is off in .config/nextest.toml so one red frontend
+          # doesn't hide the others (several tests are red by design until
+          # their fix PR merges; tests/e2e/README.md, tracker #777)
+          nix develop "$DEVSHELL" -c cargo nextest run -p kime-e2e \
+            --run-ignored ignored-only 2>&1 | tee target/e2e/nextest.log
       # The runner image points ACTIONS_RESULTS_URL at the LAN cache server
       # (see ~/actions-runner-docker/Dockerfile), which serves the cache API
       # only. The patched worker leaves the real service URL in

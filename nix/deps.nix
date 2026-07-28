@@ -38,6 +38,7 @@
   # The pygobject-enabled python3 shadows the plain `python3` above, so
   # shell.nix must put this list first on PATH.
   kimeE2eNativeBuildInputs = with pkgs; [
+    cargo-nextest # parallel per-process test runner (run.sh, e2e CI job)
     (python3.withPackages (ps: [ ps.pygobject3 ])) # clients/gtk_probe.py
     gobject-introspection # Gtk-3.0/4.0 typelibs -> GI_TYPELIB_PATH
     # unwrapped: the wrapper execs sway under dbus-run-session, which has no
