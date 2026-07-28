@@ -23,5 +23,30 @@
     meson
     ninja
   ];
+
+  # Libraries the e2e clients (tests/e2e/clients) link against on top of the
+  # kime build inputs: Xlib for the XIM client, XTEST for the raw-keycode
+  # injector. wayland-client/xkbcommon already come from kimeBuildInputs.
+  kimeE2eBuildInputs = with pkgs; [
+    libx11
+    libxtst
+  ];
+
+  # Runtime tooling for the headless e2e GUI suite (tests/e2e). Only the
+  # devshell pulls these in — the package build never runs the suite.
+  #
+  # The pygobject-enabled python3 shadows the plain `python3` above, so
+  # shell.nix must put this list first on PATH.
+  kimeE2eNativeBuildInputs = with pkgs; [
+    (python3.withPackages (ps: [ ps.pygobject3 ])) # clients/gtk_probe.py
+    gobject-introspection # Gtk-3.0/4.0 typelibs -> GI_TYPELIB_PATH
+    # unwrapped: the wrapper execs sway under dbus-run-session, which has no
+    # session.conf to read outside NixOS — and a headless test compositor
+    # needs no session bus.
+    sway-unwrapped # headless compositor for the wayland tests
+    xvfb # headless X server for the gtk/qt/xim tests
+    xdotool # XTEST typing + window focus
+    xprop # kime-xim readiness poll (XIM_SERVERS)
+  ];
 }
 
