@@ -9,7 +9,7 @@
 //!   `WAYLAND_DISPLAY`/`DISPLAY`.
 //! - Never kill by name: [`proc::Proc`] is an RAII guard that kills only the
 //!   exact pid it spawned.
-//! - `LD_LIBRARY_PATH` always points at the local `target/debug`
+//! - `LD_LIBRARY_PATH` always starts with the local `target/debug`
 //!   (the system `libkime_engine.so` is stale on dev machines), and immodule
 //!   tests must verify the local module loaded via [`stage::maps_check`].
 //! - On Wayland, the [`inject::VkbdInjector`] must be constructed BEFORE

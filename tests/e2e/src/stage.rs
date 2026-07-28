@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use crate::envs::clean_cmd;
+use crate::envs::{self, clean_cmd};
 use crate::paths::{self, Frontend, ScratchDir};
 use crate::Result;
 
@@ -30,7 +30,7 @@ pub fn stage_gtk3(scratch: &ScratchDir) -> Result<Staged> {
     let cache = dir.join("immodules.cache");
     // The query tool dlopens the module, which links against libkime_engine.so.
     let output = clean_cmd("gtk-query-immodules-3.0")
-        .env("LD_LIBRARY_PATH", paths::target_dir())
+        .env("LD_LIBRARY_PATH", envs::ld_library_path())
         .arg(&module)
         .output()
         .map_err(|e| format!("failed to run gtk-query-immodules-3.0: {e}"))?;

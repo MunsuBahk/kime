@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use crate::envs::clean_cmd;
-use crate::paths::{self, ScratchDir};
+use crate::envs::{self, clean_cmd};
+use crate::paths::ScratchDir;
 use crate::proc::{self, Proc};
 use crate::x11::XvfbSession;
 use crate::{cc, Result};
@@ -138,7 +138,7 @@ pub fn spawn_gtk_probe_x11(
     let mut cmd = clean_cmd("python3");
     cmd.env("DISPLAY", x.display())
         .env("GDK_BACKEND", "x11")
-        .env("LD_LIBRARY_PATH", paths::target_dir());
+        .env("LD_LIBRARY_PATH", envs::ld_library_path());
     spawn_gtk_common(cmd, extra_env, opts, scratch)
 }
 
@@ -224,7 +224,7 @@ fn spawn_qt_common(
     let log = scratch.file(&format!("qt{qt_major}-probe.log"));
     let logfile =
         std::fs::File::create(&log).map_err(|e| format!("cannot create {}: {e}", log.display()))?;
-    cmd.env("LD_LIBRARY_PATH", paths::target_dir());
+    cmd.env("LD_LIBRARY_PATH", envs::ld_library_path());
     for (k, v) in extra_env {
         cmd.env(k, v);
     }

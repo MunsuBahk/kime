@@ -59,15 +59,28 @@ pub enum Frontend {
     Qt6,
 }
 
-/// Path of a frontend immodule .so in the meson build dir.
-pub fn immodule(frontend: Frontend) -> PathBuf {
-    let rel = match frontend {
+fn immodule_rel(frontend: Frontend) -> &'static str {
+    match frontend {
         Frontend::Gtk3 => "src/frontends/gtk3/libim-kime.so",
         Frontend::Gtk4 => "src/frontends/gtk4/libkime-gtk4.so",
         Frontend::Qt5 => "src/frontends/qt5/libkimeplatforminputcontextplugin.so",
         Frontend::Qt6 => "src/frontends/qt6/libkimeplatforminputcontextplugin.so",
-    };
+    }
+}
+
+/// Path of a frontend immodule .so in the meson build dir.
+pub fn immodule(frontend: Frontend) -> PathBuf {
+    let rel = immodule_rel(frontend);
     require(build_dir().join(rel), rel)
+}
+
+/// [`immodule`], but `None` when the build did not produce it — for frontends
+/// a build may legitimately leave out. Only Qt5 qualifies: nixpkgs refuses
+/// Qt5 and Qt6 in one environment, so the CI devshell builds the Qt6 plugin
+/// only. Every other frontend must be present, and [`immodule`] says so.
+pub fn immodule_opt(frontend: Frontend) -> Option<PathBuf> {
+    let path = build_dir().join(immodule_rel(frontend));
+    path.exists().then_some(path)
 }
 
 /// `tests/e2e/clients` (C/C++/python sources vendored with the suite).

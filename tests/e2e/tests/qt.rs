@@ -86,6 +86,17 @@ fn focus_window_retry(
 /// `QInputMethodEvent` at all. The `/proc/maps` check additionally proves the
 /// freshly built plugin loaded rather than a stale system copy.
 fn qt_smoke(qt_major: u32) {
+    if qt_major == 5 && paths::immodule_opt(paths::Frontend::Qt5).is_none() {
+        // Not a regression: a build may leave the qt5 plugin out (meson
+        // `qt5=auto` finds no Qt5, as in the nix devshell CI uses — nixpkgs
+        // refuses Qt5 and Qt6 side by side). The qt6 smoke below never takes
+        // this path: its plugin is required and its absence must fail.
+        eprintln!(
+            "SKIP q5_smoke: no qt5 plugin in {} — this build has the qt5 frontend disabled",
+            paths::build_dir().display()
+        );
+        return;
+    }
     let scratch = ScratchDir::new(&format!("qt{qt_major}_smoke"));
     let x = XvfbSession::new(&scratch).expect("start Xvfb");
     let xdg = kime::write_config(&scratch, kime::HANGUL_CONFIG).expect("write kime config");

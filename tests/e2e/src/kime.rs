@@ -1,14 +1,14 @@
 //! Spawning the kime daemons under test, with per-test config.
 //!
-//! Both daemons run with `LD_LIBRARY_PATH=<target dir>` (the system
-//! `libkime_engine.so` is stale on dev machines) and a per-test
+//! Both daemons run with the local target dir first on `LD_LIBRARY_PATH`
+//! (the system `libkime_engine.so` is stale on dev machines) and a per-test
 //! `XDG_CONFIG_HOME` written by [`write_config`].
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use crate::envs::clean_cmd;
+use crate::envs::{self, clean_cmd};
 use crate::paths::{self, ScratchDir};
 use crate::proc::{self, Proc};
 use crate::Result;
@@ -55,7 +55,7 @@ impl KimeWayland {
         let mut cmd = clean_cmd(&bin);
         cmd.env("WAYLAND_DISPLAY", socket)
             .env("WAYLAND_DEBUG", "1")
-            .env("LD_LIBRARY_PATH", paths::target_dir())
+            .env("LD_LIBRARY_PATH", envs::ld_library_path())
             .env("XDG_CONFIG_HOME", xdg_config_home)
             .env("RUST_BACKTRACE", "1")
             .args(["--log", "debug"])
@@ -140,7 +140,7 @@ impl KimeXim {
             .map_err(|e| format!("cannot create {}: {e}", log.display()))?;
         let mut cmd = clean_cmd(&bin);
         cmd.env("DISPLAY", display)
-            .env("LD_LIBRARY_PATH", paths::target_dir())
+            .env("LD_LIBRARY_PATH", envs::ld_library_path())
             .env("XDG_CONFIG_HOME", xdg_config_home)
             .env("RUST_BACKTRACE", "1")
             .args(["--log", "debug"])
