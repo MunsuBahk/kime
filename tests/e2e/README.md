@@ -161,47 +161,43 @@ Teardown is RAII by exact pid in reverse order; tests must be run with
 | #606/#613 GTK4 Enter/Tab/arrows swallowed during preedit | `gtk4::g4_01_606_enter_commits_and_newlines`, `gtk4::g4_02_606_tab_and_arrow_reach_widget` | PR #775 fix 1 |
 | PR #775 GTK3 guard: deferral path unchanged (#536/#565/#570) | `gtk3::g3_01_775_deferral_path_unchanged` | PR #775 fix 1 |
 | #617 zombie kime-candidate-window children | `gtk3::g3_02_617_no_zombie_candidates` | PR #769 fix 2 |
-| #757 Qt candidate popup killed on focus loss | `qt::q01_757_candidate_survives_focus_loss` (currently SKIPs: residual bug, see below) | PR #771 (incomplete) |
+| #757 Qt candidate popup killed on focus loss | `qt::q01_757_candidate_survives_focus_loss` (**red until #784 merges**) | PR #771 + #784 |
 | #760 AltR toggle dead with self-modifier bit | `qt::q02_760_altr_self_modifier_e2e` | PR #760 |
 | #721/#731 kime-xim dies on unmapped keycode | `xim::x01_721_survives_unmapped_keycode` | PR #722 |
-| #736/#756 Qt plugin IID / plugin loads no IM | `qt::q6_smoke`, `qt::q5_smoke` (currently SKIPs: qt5 recipe bug, see below) | #736 + #756 (qt6 only) |
+| #736/#756 Qt plugin IID / plugin loads no IM | `qt::q6_smoke`, `qt::q5_smoke` (**q5 red until #785 merges**) | #736 + #756 + #785 |
+| #780 global hotkey in hanja mode leaks the popup | `gtk3::g3_02b_780_global_hotkey_closes_candidate` (**red until #787 merges**) | PR #787 |
+| #781 bypassed keys re-send an identical preedit | `wayland::w01_714_no_spurious_commit` Hangul phase (**red until #788 merges**) | PR #788 |
+| #782 kime-wayland dies on a keymapless seat | `wayland::w05_782_survives_keymapless_seat` (**red until #789 merges**) | PR #789 |
+| #783 GTK3-over-XIM preedit echo loop | `xim::x03_783_gtk3_xim_client_commits` (**red until #786 merges**) | PR #786 |
 | harness/pipeline guards | `wayland::w_smoke`, `gtk3::g3_smoke`, `gtk4::g4_smoke`, `xim::x_smoke`, `clients::build_all_clients` | — |
+
+Tests marked **red** guard bugs whose fixes are in open PRs (tracker #777):
+they fail — deliberately, no skips — until the fix lands in the branch under
+test. A `q5_smoke` skip is legitimate only when the build has the qt5
+frontend disabled entirely (e.g. the nix devshell).
 
 Not implemented (deliberately): #579 UAF (needs a purpose-built ASAN
 harness), #754 (fully unit-covered in `src/engine/core/tests/`), #666 v1
 path via Weston headless, #769 fix 3 (log-only, not GUI-observable).
 
-## Known product bugs the suite works around
+## Known product bugs the suite guards (tracker #777)
 
-Found during harness development and left **unfixed in product code** (the
-suite documents rather than hides them):
+Found during harness development; each has a sub-issue and an open fix PR.
+The corresponding tests **fail** until the fix merges (see the table above):
 
-1. **kime-wayland crashes on an empty keymap from a keyboardless seat.** On
-   a seat with no keyboard, sway sends `keymap(format=0, size=0)`;
-   kime-wayland forwards it verbatim to its virtual keyboard, wlroots
-   rejects it, and kime aborts (panic at `src/frontends/wayland/src/main.rs`
-   roundtrip). **Workaround baked into the harness:** `VkbdInjector` must be
-   constructed *before* `KimeWayland` so the seat already has a real keymap.
-   Real fix: skip forwarding `format=0/size=0` keymaps.
-2. **kime-xim + GTK3 as an XIM client enters an infinite preedit echo
-   loop** (PreeditDraw/Done/Start cycling at ~6000 events/s; nothing ever
-   commits). The XIM tests therefore use the minimal C `PreeditNothing`
-   client (`clients/xim_client.c`) — do not "upgrade" them to a GTK probe.
-3. **`q5_smoke` SKIPs:** `src/frontends/qt5/meson.build` never passes
-   `KIME_QT_IID`, so the qt5 plugin metadata IID lacks the `.5.1` suffix and
-   Qt5 silently loads no kime input context (same class as #736/#756, which
-   fixed qt6 only). The test detects the missing IID string in the built
-   plugin and skips with a message; fix the meson recipe (mirror
-   `qt6/meson.build`) and it runs fully.
-4. **`q01_757` SKIPs:** PR #771 guards `setFocusObject` but Qt calls
-   `commit()` → `reset()` *first* on focus-out, so the candidate popup still
-   dies. The test detects the popup death and skips with a message; guard
-   `commit()` with `engine_ready` in
-   `src/frontends/qt5/src/input_context.cc` and it runs fully.
-
-Two further residual issues are documented in test doc comments:
-`w01_714_no_spurious_commit` (bypassed keys re-send an identical preedit —
-asserted at "no bare commit" strength instead of "no commit") and
-`g3_02_617_no_zombie_candidates` (Esc in hanja mode is swallowed as a merged
-global hotkey and leaks the candidate popup — the test dismisses with
-BackSpace instead).
+1. **#782** kime-wayland crashes on an empty keymap from a keyboardless
+   seat (fix: #789). Until it merges, the harness ordering rule stands:
+   `VkbdInjector` must be constructed *before* `KimeWayland` so the seat
+   already has a real keymap — only `w05` deliberately violates it.
+2. **#783** kime-xim + GTK3 as an XIM client enters an infinite preedit
+   echo loop (fix: #786). The other XIM tests keep using the minimal C
+   `PreeditNothing` client (`clients/xim_client.c`) — the GTK3-over-XIM
+   path is exercised only by `x03`.
+3. **#778** qt5 plugin metadata IID lacks `.5.1` — Qt5 loads no kime input
+   context (fix: #785, mirrors `qt6/meson.build`).
+4. **#779** Qt calls `commit()` → `reset()` on focus-out before
+   `setFocusObject`, killing the candidate popup (fix: #784).
+5. **#780** a global hotkey during hanja mode leaks the candidate window
+   (fix: #787) — which is also why `g3_02` dismisses with BackSpace.
+6. **#781** bypassed keys over a live preedit re-send an identical preedit
+   transaction (fix: #788).

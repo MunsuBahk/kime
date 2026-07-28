@@ -91,32 +91,6 @@ fn is_subsequence(needle: &[&str], hay: &[String]) -> bool {
     needle.iter().all(|n| it.any(|h| h == n))
 }
 
-/// Count "bare" `zwp_input_method_v2.commit` requests in `text`: commits not
-/// preceded — since the previous commit — by a state request
-/// (`set_preedit_string` / `commit_string`). A bare commit applies an "empty
-/// preedit, no commit string" state, the exact pre-#772 shape that clobbered
-/// selections (#714).
-fn count_bare_commits(text: &str) -> usize {
-    let mut state_sent = false;
-    let mut bare = 0;
-    for l in text.lines() {
-        if !l.contains(" -> ")
-            || !(l.contains("zwp_input_method_v2#") || l.contains("zwp_input_method_v2@"))
-        {
-            continue;
-        }
-        if l.contains(".set_preedit_string(") || l.contains(".commit_string(") {
-            state_sent = true;
-        } else if l.contains(".commit(") {
-            if !state_sent {
-                bare += 1;
-            }
-            state_sent = false;
-        }
-    }
-    bare
-}
-
 /// Assert the probe buffer is (stably) empty. The probe's dump writes are
 /// atomic (temp file + rename), but a commit still in flight could land just
 /// after a single read; sampling across several dump periods turns "empty
@@ -195,12 +169,11 @@ fn w_smoke() {
 /// `WAYLAND_DEBUG` trace. Behavioral half: a selection survives Ctrl+C and a
 /// lone Shift.
 ///
-/// With a live preedit (Hangul) the engine reports `HAS_PREEDIT` even for a
-/// bypassed modifier, so kime currently re-sends the *identical* preedit plus
-/// a commit — redundant but not the empty-composition #714 shape (see the
-/// harness report). The Hangul phase therefore asserts zero *bare* commits
-/// (commit with no accompanying state request) and that the preedit content,
-/// preedit length and buffer are undisturbed.
+/// The Hangul phase asserts the strict contract with a live preedit too: a
+/// bypassed modifier adds zero commit requests and zero preedit events. The
+/// engine reports `HAS_PREEDIT` for bypassed keys, so this half FAILS on
+/// develop until #781 (fix: #788, `last_preedit` tracking) merges — pre-#788
+/// every lone modifier re-sent the identical preedit plus a commit.
 #[test]
 #[ignore = "e2e: spawns sway and kime-wayland; run with --ignored"]
 fn w01_714_no_spurious_commit() {
@@ -267,27 +240,30 @@ fn w01_714_no_spurious_commit() {
 
         let m = wldebug::marker(&s.kime.trace);
         let n_preedit = preedits(&s.probe.preedit_log).len();
-        s.inject.press(key::LEFTSHIFT).expect("press lone Shift");
-        s.inject
-            .release(key::LEFTSHIFT)
-            .expect("release lone Shift");
+        for code in [key::LEFTCTRL, key::LEFTSHIFT, key::LEFTALT, key::LEFTMETA] {
+            s.inject.press(code).expect("press lone modifier");
+            s.inject.release(code).expect("release lone modifier");
+        }
         proc::sleep_ms(700);
 
-        let bare = count_bare_commits(&wldebug::text_after(&s.kime.trace, m));
+        let commits =
+            wldebug::count_requests_after(&s.kime.trace, m, "zwp_input_method_v2", "commit");
         assert_eq!(
-            bare, 0,
-            "lone Shift over a live preedit produced {bare} bare (empty-state) commit \
-             request(s) (#714)"
+            commits, 0,
+            "lone modifiers over a live preedit produced {commits} redundant commit \
+             request(s) — an unchanged preedit was re-sent (#714 residual, #781; fails \
+             until #788 merges)"
         );
         let after = preedits(&s.probe.preedit_log);
         assert!(
-            after[n_preedit..].iter().all(|p| p == "안"),
-            "lone Shift disturbed the preedit content; new events: {:?}",
+            after[n_preedit..].is_empty(),
+            "lone modifiers produced duplicate preedit event(s) at the client: {:?} \
+             (#781; fails until #788 merges)",
             &after[n_preedit..]
         );
         assert_buffer_empty(
             &s.probe,
-            "lone Shift committed text out of a live preedit (#714)",
+            "lone modifiers committed text out of a live preedit (#714)",
         );
         assert!(s.kime.alive(), "kime-wayland died during the Hangul phase");
     }
@@ -437,4 +413,38 @@ fn w04_603_volume_key_bypassed() {
         .wait_for("한글", Duration::from_secs(10))
         .expect("Hangul typing continued after VolumeDown (#603)");
     assert!(s.kime.alive(), "kime-wayland died during the test");
+}
+
+/// W-05 (#782, fix: #789): kime-wayland must survive a seat keyboard that has
+/// no keymap.
+///
+/// The precondition is a keyboard whose keymap is NULL — a virtual keyboard
+/// created without a keymap upload (a seat with no keyboard at all sends no
+/// grab keymap event and never triggers the bug). wlroots then reports
+/// `keyboard_grab.keymap(format=NO_KEYMAP, size=0)`; kime forwarded it
+/// verbatim to its own `zwp_virtual_keyboard_v1`, the compositor rejected the
+/// zero-size mmap with a fatal protocol error, and kime aborted (panic at the
+/// roundtrip unwrap in `main.rs`). This is what breaks naive headless/CI
+/// setups — the other tests in this file dodge it via injector-before-kime
+/// ordering. FAILS on develop until #789 merges.
+#[test]
+#[ignore = "e2e: spawns sway and kime-wayland; run with --ignored"]
+fn w05_782_survives_keymapless_seat() {
+    let scratch = ScratchDir::new("w05_782");
+    let sway = SwaySession::new(&scratch).expect("start sway");
+    let _kbd = probes::spawn_keymapless_kbd(sway.socket(), &scratch)
+        .expect("start keymapless keyboard holder");
+    let xdg = kime::write_config(&scratch, kime::HANGUL_CONFIG).expect("write kime config");
+    let mut kime_wl =
+        KimeWayland::spawn_unready(sway.socket(), &xdg, &scratch).expect("spawn kime-wayland");
+    // Pre-#789 kime forwards the empty keymap and aborts within ~1s of the
+    // grab; 3s of liveness proves the guard.
+    proc::sleep_ms(3000);
+    assert!(
+        kime_wl.alive(),
+        "kime-wayland died on a keymapless seat keyboard — the compositor's \
+         format=0/size=0 grab keymap was forwarded verbatim (#782; fails until #789 \
+         merges); trace: {}",
+        kime_wl.trace.display()
+    );
 }

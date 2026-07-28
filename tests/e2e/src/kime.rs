@@ -61,14 +61,40 @@ impl KimeWayland {
             .args(["--log", "debug"])
             .stdout(Stdio::null())
             .stderr(tracefile);
-        let mut proc = Proc::spawn(&mut cmd, "kime-wayland")?;
+        let mut kw = Self::spawn_unready(socket, xdg_config_home, scratch)?;
         // Startup sequence: bind input_method_v2 → grab keyboard → receive the
         // (injector-provided) keymap → forward it to kime's virtual keyboard.
-        proc.wait_ready_line(
+        let trace = kw.trace.clone();
+        kw.proc.wait_ready_line(
             &trace,
             &["zwp_virtual_keyboard_v1", ".keymap("],
             Duration::from_secs(10),
         )?;
+        Ok(kw)
+    }
+
+    /// Spawn WITHOUT waiting for a keymap forward — for tests that
+    /// deliberately give kime a seat with no keymapped keyboard (w05, #782):
+    /// there is nothing to forward, and the pre-#789 binary dies outright.
+    pub fn spawn_unready(
+        socket: &str,
+        xdg_config_home: &Path,
+        scratch: &ScratchDir,
+    ) -> Result<KimeWayland> {
+        let bin = paths::bin("kime-wayland");
+        let trace = scratch.file("kime-wayland.trace");
+        let tracefile = std::fs::File::create(&trace)
+            .map_err(|e| format!("cannot create {}: {e}", trace.display()))?;
+        let mut cmd = clean_cmd(&bin);
+        cmd.env("WAYLAND_DISPLAY", socket)
+            .env("WAYLAND_DEBUG", "1")
+            .env("LD_LIBRARY_PATH", envs::ld_library_path())
+            .env("XDG_CONFIG_HOME", xdg_config_home)
+            .env("RUST_BACKTRACE", "1")
+            .args(["--log", "debug"])
+            .stdout(Stdio::null())
+            .stderr(tracefile);
+        let proc = Proc::spawn(&mut cmd, "kime-wayland")?;
         Ok(KimeWayland { trace, proc })
     }
 

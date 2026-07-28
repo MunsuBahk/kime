@@ -15,6 +15,7 @@ fn build_all_clients() {
     cc::xtest_key().expect("build xtest_key");
     cc::vkbd_inject().expect("build vkbd_inject");
     cc::wlkbd_probe().expect("build wlkbd_probe");
+    cc::keymapless_kbd().expect("build keymapless_kbd");
     // The Qt5 probe only when this build has a qt5 plugin to test it against
     // — the same condition `qt::q5_smoke` skips on.
     if paths::immodule_opt(Frontend::Qt5).is_some() {

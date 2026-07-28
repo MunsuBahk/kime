@@ -55,6 +55,27 @@ pub fn vkbd_inject() -> Result<PathBuf> {
     )
 }
 
+/// Build the keymapless virtual-keyboard holder (the #782 repro
+/// precondition: a seat keyboard whose keymap is NULL).
+pub fn keymapless_kbd() -> Result<PathBuf> {
+    let src = paths::clients_dir().join("keymapless_kbd.c");
+    let glue = scanner_glue("virtual-keyboard-unstable-v1")?;
+    let flags = pkg_config(&["wayland-client"])?;
+    build(
+        "keymapless_kbd",
+        &[src.clone(), glue.clone()],
+        move |cmd, out| {
+            cmd.args(["-O1", "-I"])
+                .arg(paths::clients_out_dir())
+                .arg("-o")
+                .arg(out)
+                .arg(&src)
+                .arg(&glue)
+                .args(&flags);
+        },
+    )
+}
+
 /// Build the plain wl_keyboard probe (`wlkbd_probe <outfile>`).
 pub fn wlkbd_probe() -> Result<PathBuf> {
     let src = paths::clients_dir().join("wlkbd_probe.c");

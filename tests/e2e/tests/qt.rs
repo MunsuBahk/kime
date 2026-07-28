@@ -101,22 +101,14 @@ fn qt_smoke(qt_major: u32) {
     let x = XvfbSession::new(&scratch).expect("start Xvfb");
     let xdg = kime::write_config(&scratch, kime::HANGUL_CONFIG).expect("write kime config");
     let staged = stage::stage_qt(&scratch, qt_major).expect("stage qt plugin");
-    if qt_major == 5 && !plugin_has_versioned_iid(&staged.module_path) {
-        // KNOWN PRODUCT BUG (reported, unfixed): src/frontends/qt5/meson.build
-        // does not pass KIME_QT_IID to the compiler/moc, so the plugin
-        // metadata IID lacks the required `.5.1` suffix and Qt5 silently
-        // loads no input context (same class as #736/#756, which fixed qt6
-        // only; broken since the meson migration #747). Once the recipe adds
-        // the define — mirroring qt6/meson.build — this branch stops firing
-        // and the full smoke runs. The qt6 build must NOT take this out: an
-        // IID regression there is exactly what this smoke exists to catch.
-        eprintln!(
-            "SKIP q5_smoke: KNOWN PRODUCT BUG — qt5 plugin metadata IID lacks '.5.1' \
-             (KIME_QT_IID define missing from src/frontends/qt5/meson.build); Qt5 loads no \
-             kime input context. Fix the meson recipe to enable this test."
-        );
-        return;
-    }
+    // FAILS on develop until #778 (fix: #785) merges for qt5: the meson qt5
+    // recipe drops the KIME_QT_IID define, the metadata IID lacks `.5.1`, and
+    // Qt5 silently loads no input context.
+    assert!(
+        plugin_has_versioned_iid(&staged.module_path),
+        "qt{qt_major} plugin metadata IID lacks '.5.1' — KIME_QT_IID define missing from the \
+         meson recipe, Qt loads no kime input context (#736/#756 bug class; qt5: #778)"
+    );
     let mut env = staged.env.clone();
     env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
     let mut probe =
@@ -166,9 +158,10 @@ fn q5_smoke() {
 /// shared by the qt5 and qt6 builds) marks the engine NOT_READY so
 /// `setFocusObject(nullptr)` skips the reset.
 ///
-/// NOTE: currently skips at the popup-liveness check — PR #771 left the
-/// `commit()`-on-focus-out path unguarded, so the popup still dies (residual
-/// #757, reported). The skip message documents the verified one-line fix.
+/// FAILS on develop until #779 (fix: #784) merges: PR #771 left the
+/// `commit()`-on-focus-out path unguarded — Qt calls `commit()` before
+/// `setFocusObject(nullptr)`, its unconditional `reset()` kills the popup,
+/// and the `engine_ready` guard never runs.
 #[test]
 #[ignore = "e2e: spawns Xvfb, a Qt6 GUI probe and kime-candidate-window; run with --ignored"]
 fn q01_757_candidate_survives_focus_loss() {
@@ -233,25 +226,12 @@ fn q01_757_candidate_survives_focus_loss() {
         .expect("focus the candidate popup");
     proc::sleep_ms(1000);
 
-    if !proc::pid_alive(popup) {
-        // KNOWN PRODUCT BUG (reported, unfixed): issue #757 is not fully
-        // fixed by PR #771. On focus-out Qt calls
-        // QPlatformInputContext::commit() BEFORE setFocusObject(nullptr);
-        // KimeInputContext::commit() unconditionally runs reset(), killing
-        // the just-spawned candidate window and discarding the syllable —
-        // the engine_ready guard in setFocusObject never gets a chance.
-        // Verified fix: guard commit() with engine_ready in
-        // src/frontends/qt5/src/input_context.cc (this test passes against
-        // a plugin built with that one-line change). Until then this branch
-        // skips instead of failing the suite.
-        eprintln!(
-            "SKIP q01_757: KNOWN PRODUCT BUG — candidate window (pid {popup}) died after the \
-             app lost focus: Qt's focus-out commit() runs reset() before setFocusObject's \
-             engine_ready guard (residual #757, PR #771 incomplete). Guard commit() with \
-             engine_ready to enable this test."
-        );
-        return;
-    }
+    assert!(
+        proc::pid_alive(popup),
+        "candidate window (pid {popup}) died after the app lost focus — Qt's focus-out \
+         commit() runs reset() before setFocusObject's engine_ready guard (#757 residual, \
+         #779; fails until #784 merges)"
+    );
     let events = probes::read_im_log(&probe.preedit_log);
     let after = &events[marker.min(events.len())..];
     assert!(

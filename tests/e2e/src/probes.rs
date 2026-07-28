@@ -297,6 +297,40 @@ pub fn spawn_xim_client(x: &XvfbSession, scratch: &ScratchDir) -> Result<XimProb
     }
 }
 
+/// A seat keyboard with NO keymap: the client creates a
+/// `zwp_virtual_keyboard_v1` and never uploads a keymap, so wlroots reports
+/// `keymap(format=NO_KEYMAP, size=0)` to an input-method grab — the #782
+/// precondition. Keep the struct alive while the scenario runs (dropping it
+/// removes the keyboard).
+pub struct KeymaplessKbd {
+    proc: Proc,
+}
+
+impl KeymaplessKbd {
+    pub fn pid(&self) -> i32 {
+        self.proc.pid()
+    }
+}
+
+/// Spawn the keymapless-keyboard holder on `socket` and wait for `READY`.
+pub fn spawn_keymapless_kbd(socket: &str, scratch: &ScratchDir) -> Result<KeymaplessKbd> {
+    let bin = cc::keymapless_kbd()?;
+    let log = scratch.file("keymapless-kbd.log");
+    let logfile =
+        std::fs::File::create(&log).map_err(|e| format!("cannot create {}: {e}", log.display()))?;
+    let errfile = logfile
+        .try_clone()
+        .map_err(|e| format!("cannot clone log handle: {e}"))?;
+    let mut cmd = clean_cmd(&bin);
+    cmd.env("WAYLAND_DISPLAY", socket)
+        .stdin(Stdio::null())
+        .stdout(logfile)
+        .stderr(errfile);
+    let mut proc = Proc::spawn(&mut cmd, "keymapless_kbd")?;
+    proc.wait_ready_line(&log, &["READY"], Duration::from_secs(10))?;
+    Ok(KeymaplessKbd { proc })
+}
+
 /// Plain wl_keyboard client (no text input) for W-03/#744; events appear in
 /// [`WlKbdProbe::log`] as `<ts_ms> press|release <code>` lines.
 pub struct WlKbdProbe {

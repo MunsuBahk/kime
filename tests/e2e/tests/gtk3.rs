@@ -192,12 +192,11 @@ fn g3_01_775_deferral_path_unchanged() {
 /// Pre-fix, `close` killed the child but never reaped it, accumulating one
 /// zombie per dismissed popup (#617).
 ///
-/// Esc is deliberately NOT used to dismiss: global hotkeys are merged into
-/// `mode_hotkeys`, so in Hanja mode Esc matches `!Switch Latin` and
-/// `Engine::set_input_category` clears `mode` WITHOUT closing the hanja
-/// client — the popup process leaks (separate kime bug found while writing
-/// this test; see the harness report). Any non-hotkey key reaches
-/// `HanjaMode::press_key` and the close path under test.
+/// Esc is deliberately NOT used to dismiss here: in Hanja mode Esc is a
+/// merged global hotkey and takes the `set_input_category` path — which is
+/// #780's leak, guarded separately by [`g3_02b_780_global_hotkey_closes_candidate`].
+/// Any non-hotkey key reaches `HanjaMode::press_key` and the close path under
+/// test here.
 #[test]
 #[ignore = "e2e: spawns Xvfb, a GTK3 app, and kime-candidate-window; run with --ignored"]
 fn g3_02_617_no_zombie_candidates() {
@@ -270,4 +269,72 @@ fn g3_02_617_no_zombie_candidates() {
         zombies.is_empty(),
         "#617 regression: defunct children of the probe remain: {zombies:?}"
     );
+}
+
+/// G3-02b (#780, fix: #787): a GLOBAL hotkey firing while the hanja popup is
+/// open must close the popup, not leak it.
+///
+/// Global hotkeys are merged into `mode_hotkeys[Hanja]`, so Esc in hanja mode
+/// matches `!Switch Latin` and lands in `Engine::set_input_category` — which
+/// cleared `mode` without dispatching the active mode's `reset()`, leaving
+/// `hanja_mode.client` owning a popup nothing could ever close: the process
+/// stayed alive indefinitely and became a permanently unreaped zombie once it
+/// exited. FAILS on develop until #787 (`leave_mode()`) merges.
+#[test]
+#[ignore = "e2e: spawns Xvfb, a GTK3 app, and kime-candidate-window; run with --ignored"]
+fn g3_02b_780_global_hotkey_closes_candidate() {
+    let scratch = ScratchDir::new("g3_02b_780");
+    let x = XvfbSession::new(&scratch).expect("start Xvfb");
+    let extra_env = vec![
+        ("LIBGL_ALWAYS_SOFTWARE".into(), "1".into()),
+        (
+            "PATH".into(),
+            format!(
+                "{}:{}",
+                paths::target_dir().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        ),
+    ];
+    let (probe, staged) = spawn_probe(&x, &scratch, false, &extra_env);
+    x.focus_window(PROBE_TITLE).expect("focus probe window");
+
+    let since = im_len(&probe.preedit_log);
+    x.type_text("gks").expect("type gks");
+    wait_new_preedit(&probe.preedit_log, "한", since);
+    stage::maps_check_staged(probe.pid(), &staged).expect("local gtk3 immodule loaded");
+
+    x.key("Control_R").expect("press Control_R");
+    let mut child = 0;
+    proc::wait_until(
+        "kime-candidate-window child of probe",
+        Duration::from_secs(15),
+        || match candidate_children(probe.pid()).first() {
+            Some(&c) => {
+                child = c;
+                true
+            }
+            None => false,
+        },
+    )
+    .expect("hanja candidate window did not spawn");
+
+    // Esc: merged global hotkey `!Switch Latin` → Engine::set_input_category.
+    // With the #787 fix the active mode's reset() runs first (Client::close
+    // kill+reap); pre-fix the popup outlives this wait.
+    x.focus_window(PROBE_TITLE).expect("refocus probe window");
+    x.key("Escape").expect("press Escape");
+    proc::wait_until(
+        &format!("candidate child {child} to be closed AND reaped after Esc"),
+        WAIT,
+        || !child_pids(probe.pid()).contains(&child),
+    )
+    .expect("popup leaked after a global hotkey in hanja mode (#780; fails until #787 merges)");
+
+    // The hotkey must still have done its job: category switched to Latin.
+    x.type_text("d").expect("type d");
+    probe
+        .buffer
+        .wait_contains("d", WAIT)
+        .expect("Esc did not switch the category to Latin (expected a literal 'd')");
 }

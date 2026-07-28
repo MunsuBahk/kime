@@ -205,3 +205,50 @@ fn candidate_children(pid: i32) -> Vec<i32> {
     }
     out
 }
+
+/// X-03 (#783, fix: #786): a GTK3 app on the XIM bridge must be able to
+/// compose and commit — no preedit echo loop.
+///
+/// GTK3's XIM immodule negotiates `PREEDIT_CALLBACKS` (it draws the preedit
+/// in its own widget) and reports the resulting cursor move back with
+/// `SetICValues(XNSpotLocation)`. kime-xim answered every spot report by
+/// tearing down and re-sending the preedit, which moved the cursor again — a
+/// self-sustaining PreeditDone/PreeditStart/PreeditDraw echo at ~100k
+/// messages/s in which nothing ever commits. FAILS on develop until #786
+/// (skip the redraw for `PREEDIT_CALLBACKS` contexts) merges.
+///
+/// The GTK3 probe here uses `GTK_IM_MODULE=xim` (no kime immodule staging):
+/// GTK3 → XIM → kime-xim, the exact #783 client path.
+#[test]
+#[ignore = "e2e: spawns Xvfb, kime-xim and a GTK3 app; run with --ignored"]
+fn x03_783_gtk3_xim_client_commits() {
+    let scratch = ScratchDir::new("x03_783");
+    let x = XvfbSession::new(&scratch).expect("start Xvfb");
+    let xdg = kime::write_config(&scratch, kime::HANGUL_CONFIG).expect("write kime config");
+    let mut kime_xim = KimeXim::spawn(&x.display(), &xdg, &scratch).expect("start kime-xim");
+    let probe = probes::spawn_gtk_probe_x11(
+        &x,
+        &[
+            ("GTK_IM_MODULE".into(), "xim".into()),
+            ("XMODIFIERS".into(), "@im=kime".into()),
+        ],
+        &probes::GtkProbeOpts {
+            gtk_major: 3,
+            textview: false,
+        },
+        &scratch,
+    )
+    .expect("start gtk3 probe over XIM");
+    x.focus_window(probes::PROBE_TITLE).expect("focus probe");
+
+    x.type_text("gksrmf").expect("type gksrmf");
+    x.key("Return").expect("press Return");
+
+    probe
+        .buffer
+        .wait_for("한글", Duration::from_secs(15))
+        .expect(
+            "GTK3-over-XIM never committed — preedit echo loop (#783; fails until #786 merges)",
+        );
+    assert!(kime_xim.alive(), "kime-xim died during the test");
+}
