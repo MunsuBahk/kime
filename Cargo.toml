@@ -25,6 +25,9 @@ members = [
     "src/tools/properties_writer",
     "src/tools/run_dir",
     "src/tools/version",
+
+    # e2e GUI regression suite (tests are #[ignore]; run via tests/e2e/run.sh)
+    "tests/e2e",
 ]
 
 [profile.release]
