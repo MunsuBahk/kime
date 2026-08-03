@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use kime_e2e::kime;
 use kime_e2e::paths::{self, ScratchDir};
-use kime_e2e::probes::{self, GtkProbeOpts, GuiProbe, ImEvent, PROBE_TITLE};
+use kime_e2e::probes::{self, GtkProbeOpts, GtkResetProbe, GuiProbe, ImEvent, PROBE_TITLE};
 use kime_e2e::proc;
 use kime_e2e::stage::{self, Staged};
 use kime_e2e::x11::XvfbSession;
@@ -337,4 +337,98 @@ fn g3_02b_780_global_hotkey_closes_candidate() {
         .buffer
         .wait_contains("d", WAIT)
         .expect("Esc did not switch the category to Latin (expected a literal 'd')");
+}
+
+/// Stage the local GTK3 immodule, write a Hangul config, and spawn the
+/// re-entrant-reset probe (a direct `Gtk.IMMulticontext` — Entry/TextView
+/// hide theirs). The caller must still `focus_window(PROBE_TITLE)` before
+/// typing.
+fn spawn_reset_probe(
+    x: &XvfbSession,
+    scratch: &ScratchDir,
+    reset_in_commit: bool,
+) -> (GtkResetProbe, Staged) {
+    let staged = stage::stage_gtk3(scratch).expect("stage gtk3 immodule");
+    let xdg = kime::write_config(scratch, kime::HANGUL_CONFIG).expect("write kime config");
+    let mut env = staged.env.clone();
+    env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    let probe = probes::spawn_gtk_reset_probe_x11(x, &env, reset_in_commit, scratch)
+        .expect("start gtk3 reset probe");
+    (probe, staged)
+}
+
+/// Wait until the reset probe logged a commit line containing `한`, then let
+/// the event loop settle: the duplicate (if any) is emitted synchronously by
+/// the nested handler, but the GTK3 immodule also re-queues the event
+/// (HANDLED_MASK pass), so give any straggler time to land before reading.
+fn wait_commits_settled(probe: &GtkResetProbe) -> Vec<String> {
+    proc::wait_until(
+        &format!(
+            "a 한 commit line in {} (lines: {:?})",
+            probe.commits_log.display(),
+            probe.commit_lines()
+        ),
+        WAIT,
+        || probe.commit_lines().iter().any(|l| l.contains("한")),
+    )
+    .expect("no commit ever arrived");
+    proc::sleep_ms(500);
+    probe.commit_lines()
+}
+
+/// G3-06 (guards the probe for G3-07): with a do-nothing commit handler,
+/// `gks` + Return through the staged immodule delivers exactly ONE `한`
+/// commit at depth 1. If this fails, the probe/staging is broken and G3-07
+/// proves nothing.
+#[test]
+#[ignore = "e2e: spawns Xvfb and a GTK3 app; run with --ignored"]
+fn g3_06_reset_in_commit_baseline() {
+    let scratch = ScratchDir::new("g3_06_reset_base");
+    let x = XvfbSession::new(&scratch).expect("start Xvfb");
+    let (probe, staged) = spawn_reset_probe(&x, &scratch, false);
+    x.focus_window(PROBE_TITLE).expect("focus probe window");
+
+    x.type_text("gks").expect("type gks");
+    x.key("Return").expect("press Return");
+
+    let lines = wait_commits_settled(&probe);
+    stage::maps_check_staged(probe.pid(), &staged).expect("local gtk3 immodule loaded");
+    assert!(
+        lines == ["d1:한"],
+        "baseline: one keypress must commit 한 exactly once at depth 1;\n.commits was: {lines:?}"
+    );
+}
+
+/// G3-07 (#562; guard added by #563, removed by #570 — RED until fixed):
+/// a client calling `gtk_im_context_reset()` from inside its "commit"
+/// handler receives the SAME text twice.
+///
+/// `process_input_result` (src/frontends/gtk3/src/immodule.c) emits the
+/// commit signal BEFORE `kime_engine_clear_commit`, and `reset` →
+/// `kime_reset` is unguarded: the handler's `reset()` re-enters, re-reads
+/// the still-uncleared engine commit buffer, and emits `한` again from the
+/// nested emission (`d2:한`). That is the kime#562 Firefox pattern (reset
+/// from the commit path); #563 fixed it with an `is_committing` guard and
+/// #570 (753b106) dropped the guard. A client that resets on EVERY commit
+/// recurses without bound — the probe caps its reset at depth 1, so the bug
+/// shows as exactly one duplicate.
+#[test]
+#[ignore = "e2e: spawns Xvfb and a GTK3 app; run with --ignored"]
+fn g3_07_562_reset_in_commit_double() {
+    let scratch = ScratchDir::new("g3_07_562");
+    let x = XvfbSession::new(&scratch).expect("start Xvfb");
+    let (probe, staged) = spawn_reset_probe(&x, &scratch, true);
+    x.focus_window(PROBE_TITLE).expect("focus probe window");
+
+    x.type_text("gks").expect("type gks");
+    x.key("Return").expect("press Return");
+
+    let lines = wait_commits_settled(&probe);
+    stage::maps_check_staged(probe.pid(), &staged).expect("local gtk3 immodule loaded");
+    assert!(
+        lines == ["d1:한"],
+        "#562 regression: reset() inside the commit handler re-delivered the \
+         commit (immodule.c emits before kime_engine_clear_commit and \
+         kime_reset is unguarded since #570);\n.commits was: {lines:?}"
+    );
 }

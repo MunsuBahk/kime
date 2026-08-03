@@ -16,6 +16,11 @@ pub fn gtk_probe_py() -> PathBuf {
     paths::clients_dir().join("gtk_probe.py")
 }
 
+/// Path of the `gtk_reset_probe.py` script (no compilation needed).
+pub fn gtk_reset_probe_py() -> PathBuf {
+    paths::clients_dir().join("gtk_reset_probe.py")
+}
+
 /// Build the XIM client (`xim_client <outfile>`).
 pub fn xim_client() -> Result<PathBuf> {
     let src = paths::clients_dir().join("xim_client.c");

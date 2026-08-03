@@ -249,6 +249,115 @@ fn q01_757_candidate_survives_focus_loss() {
     }
 }
 
+/// `d<depth>:<text>` lines from the qt probe's `.commits` log (written by its
+/// `KIME_PROBE_RESET_IN_COMMIT` inputMethodEvent override; missing file =
+/// none yet).
+fn commit_depth_lines(probe: &kime_e2e::probes::GuiProbe) -> Vec<String> {
+    let path = probe.buffer.path().with_extension("txt.commits");
+    let Ok(bytes) = std::fs::read(path) else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&bytes)
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Shared Q-06/Q-07 body: Xvfb + staged qt6 plugin + the probe (with the
+/// reset-in-commit override when asked), type `gks` + Return, wait for a 한
+/// commit `QInputMethodEvent`, then let the event loop settle — the
+/// re-entrant duplicate (if any) arrives synchronously inside the outer
+/// delivery, but give any straggler time to land before reading. Returns
+/// (IM events, `.commits` depth lines).
+fn qt_reset_round(scratch_name: &str, reset_in_commit: bool) -> (Vec<ImEvent>, Vec<String>) {
+    let scratch = ScratchDir::new(scratch_name);
+    let x = XvfbSession::new(&scratch).expect("start Xvfb");
+    let xdg = kime::write_config(&scratch, kime::HANGUL_CONFIG).expect("write kime config");
+    let staged = stage::stage_qt(&scratch, 6).expect("stage qt6 plugin");
+    let mut env = staged.env.clone();
+    env.push(("XDG_CONFIG_HOME".into(), xdg.display().to_string()));
+    if reset_in_commit {
+        env.push(("KIME_PROBE_RESET_IN_COMMIT".into(), "1".into()));
+    }
+    let mut probe = probes::spawn_qt_probe_x11(&x, 6, &env, &scratch).expect("start qt6 probe");
+    stage::maps_check_staged(probe.pid(), &staged).expect("staged kime plugin loaded");
+    x.focus_window(probes::PROBE_TITLE).expect("focus probe");
+
+    x.type_text("gks").expect("type gks");
+    x.key("Return").expect("press Return");
+
+    proc::wait_until(
+        &format!(
+            "a 한 commit event in {} (events: {:?})",
+            probe.preedit_log.display(),
+            probes::read_im_log(&probe.preedit_log)
+        ),
+        Duration::from_secs(10),
+        || {
+            probes::read_im_log(&probe.preedit_log)
+                .iter()
+                .any(|e| matches!(e, ImEvent::Commit(c) if c.contains("한")))
+        },
+    )
+    .expect("no commit ever arrived");
+    proc::sleep_ms(500);
+    assert!(probe.alive(), "qt6 probe died during the test");
+    let events = probes::read_im_log(&probe.preedit_log);
+    let depth_lines = commit_depth_lines(&probe);
+    (events, depth_lines)
+}
+
+/// Q-06 (guards the probe for Q-07): with the reset-in-commit override
+/// disabled, `gks` + Return through the staged qt6 plugin delivers exactly
+/// ONE 한 commit `QInputMethodEvent`. If this fails, the probe/staging is
+/// broken and Q-07 proves nothing.
+#[test]
+#[ignore = "e2e: spawns Xvfb and a Qt6 GUI probe; run with --ignored"]
+fn q06_reset_in_commit_baseline() {
+    let (events, depth_lines) = qt_reset_round("q06_reset_base", false);
+    let commits: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            ImEvent::Commit(c) => Some(c.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        commits == ["한"],
+        "baseline: one keypress must commit 한 exactly once;\ncommits: {commits:?}\nevents: {events:?}"
+    );
+    assert!(
+        depth_lines.is_empty(),
+        "normal mode must not write the .commits log (probe mode leaked);\ngot: {depth_lines:?}"
+    );
+}
+
+/// Q-07 (#562-class — the qt twin of G3-07): a client whose
+/// `inputMethodEvent()` calls `QGuiApplication::inputMethod()->reset()` upon
+/// a commit receives the SAME text twice.
+///
+/// `process_input_result` (src/frontends/qt5/src/input_context.cc, shared by
+/// the qt5 and qt6 builds) emits the commit via the SYNCHRONOUS
+/// `QCoreApplication::sendEvent` BEFORE `kime_engine_clear_commit`, and
+/// `reset()` is unguarded (`clear_preedit` → `commit_str(emit)` →
+/// `kime_engine_reset`): the widget's reset re-enters while the outer
+/// sendEvent is still on the stack, re-reads the still-uncleared engine
+/// commit buffer, and delivers 한 again (`d2:한`). The probe caps its reset
+/// at depth 1 — an always-resetting client would recurse without bound — so
+/// the bug shows as exactly one duplicate line.
+#[test]
+#[ignore = "e2e: spawns Xvfb and a Qt6 GUI probe; run with --ignored"]
+fn q07_reset_in_commit_double() {
+    let (events, depth_lines) = qt_reset_round("q07_reset_double", true);
+    assert!(
+        depth_lines == ["d1:한"],
+        "#562-class regression: reset() inside inputMethodEvent re-delivered \
+         the commit (input_context.cc emits via sendEvent before \
+         kime_engine_clear_commit and reset() is unguarded);\n.commits was: \
+         {depth_lines:?}\nevents: {events:?}"
+    );
+}
+
 /// True when the Qt6 wayland platform plugin appears to be installed. When the
 /// platforms dir is missing entirely we optimistically return true and let the
 /// probe spawn decide.

@@ -187,6 +187,85 @@ fn spawn_gtk_common(
     })
 }
 
+/// A spawned `gtk_reset_probe.py` client: a direct `Gtk.IMMulticontext` (no
+/// Entry/TextView) that logs every "commit" signal with its handler nesting
+/// depth — the instrument for the #562 re-entrant-reset tests.
+pub struct GtkResetProbe {
+    /// `.commits` log: one `d<depth>:<text>` line per "commit" signal
+    /// (read with [`GtkResetProbe::commit_lines`]; `d2:`+ = re-entrant).
+    pub commits_log: PathBuf,
+    /// `.preedit` log path (parse with [`read_im_log`]).
+    pub preedit_log: PathBuf,
+    /// `.events` trace (key forwarding + reset markers).
+    pub events_log: PathBuf,
+    /// Probe stderr log.
+    pub log: PathBuf,
+    proc: Proc,
+}
+
+impl GtkResetProbe {
+    pub fn pid(&self) -> i32 {
+        self.proc.pid()
+    }
+
+    pub fn alive(&mut self) -> bool {
+        self.proc.alive()
+    }
+
+    /// All `d<depth>:<text>` lines committed so far (missing file = none yet).
+    pub fn commit_lines(&self) -> Vec<String> {
+        let Ok(bytes) = std::fs::read(&self.commits_log) else {
+            return Vec::new();
+        };
+        String::from_utf8_lossy(&bytes)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+}
+
+/// GTK3 re-entrant-reset probe on a harness X display with staged-immodule
+/// env. `reset_in_commit` passes `--reset-in-commit` (the client calls
+/// `im.reset()` from its commit handler — the kime#562 Firefox pattern).
+/// Waits for `READY` and verifies the IMMulticontext picked the `kime` slave;
+/// callers still need [`XvfbSession::focus_window`]`(`[`PROBE_TITLE`]`)`.
+pub fn spawn_gtk_reset_probe_x11(
+    x: &XvfbSession,
+    extra_env: &[(String, String)],
+    reset_in_commit: bool,
+    scratch: &ScratchDir,
+) -> Result<GtkResetProbe> {
+    let out = scratch.file("gtk3-reset");
+    let log = scratch.file("gtk3-reset-probe.log");
+    let logfile =
+        std::fs::File::create(&log).map_err(|e| format!("cannot create {}: {e}", log.display()))?;
+    let mut cmd = clean_cmd("python3");
+    cmd.env("DISPLAY", x.display())
+        .env("GDK_BACKEND", "x11")
+        .env("LD_LIBRARY_PATH", envs::ld_library_path());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    cmd.arg(cc::gtk_reset_probe_py()).arg(&out);
+    if reset_in_commit {
+        cmd.arg("--reset-in-commit");
+    }
+    cmd.stdout(Stdio::null()).stderr(logfile);
+    let mut proc = Proc::spawn(&mut cmd, "gtk3-reset-probe")?;
+    proc.wait_ready_line(&log, &["READY"], Duration::from_secs(15))?;
+    // The probe prints CONTEXT_ID before READY; anything but "kime" means GTK
+    // silently fell back to another slave and the test would be vacuous.
+    proc::wait_for_line(&log, &["CONTEXT_ID:kime"], Duration::from_secs(1))
+        .map_err(|e| format!("IMMulticontext slave is not kime: {e}"))?;
+    Ok(GtkResetProbe {
+        commits_log: out.with_extension("commits"),
+        preedit_log: out.with_extension("preedit"),
+        events_log: out.with_extension("events"),
+        log,
+        proc,
+    })
+}
+
 /// Qt probe (QLineEdit) on a harness X display with staged plugin env.
 pub fn spawn_qt_probe_x11(
     x: &XvfbSession,
