@@ -136,9 +136,17 @@ KeyRet process_input_result(KimeImContext *ctx, KimeInputResult ret) {
     // an app destroying the IM context from the handler); keep ctx and
     // ctx->engine alive until we are done with them.
     g_object_ref(ctx);
+    // Snapshot the commit string and clear the engine buffer BEFORE emitting:
+    // a client may call gtk_im_context_reset() from inside its "commit"
+    // handler (the #562 Firefox pattern), re-entering kime_reset while this
+    // emission is still on the stack. With emit-then-clear the re-entrant
+    // reset would read the still-populated engine buffer and commit the same
+    // string again (#563 guarded this with is_committing; #570 removed the
+    // guard). With the buffer already cleared, a re-entrant reset only
+    // commits the live preedit, which is the correct reset semantic.
     str_buf_set_str(&ctx->buf, kime_engine_commit_str(ctx->engine));
-    commit(ctx);
     kime_engine_clear_commit(ctx->engine);
+    commit(ctx);
     g_object_unref(ctx);
   }
 
@@ -163,8 +171,13 @@ void focus_in(GtkIMContext *im) {
 void kime_reset(KimeImContext *ctx) {
   kime_engine_clear_preedit(ctx->engine);
   str_buf_set_str(&ctx->buf, kime_engine_commit_str(ctx->engine));
-  commit(ctx);
+  // Reset the engine (which clears its commit buffer) BEFORE emitting so a
+  // re-entrant reset from the "commit" handler sees an empty engine and
+  // becomes a no-op instead of re-committing the same string (#562; the
+  // #563 is_committing guard for this was removed in #570). commit() skips
+  // empty snapshots, so a bare reset emits nothing.
   kime_engine_reset(ctx->engine);
+  commit(ctx);
 }
 
 void reset(GtkIMContext *im) {
