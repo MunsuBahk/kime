@@ -8,7 +8,7 @@ on:
     inputs:
       targets:
         description: "space-separated fuzz targets"
-        default: "engine_key_stream engine_diff_libhangul layout_yaml config_yaml"
+        default: "engine_key_stream engine_diff_libhangul frontend_commit_protocol layout_yaml config_yaml"
       seconds_per_target:
         description: "libFuzzer -max_total_time per target"
         default: "900"
@@ -50,7 +50,7 @@ jobs:
           echo "DEVSHELL=$shell" >> "$GITHUB_ENV"
       - name: Fuzz
         env:
-          TARGETS: ${{ inputs.targets || 'engine_key_stream engine_diff_libhangul layout_yaml config_yaml' }}
+          TARGETS: ${{ inputs.targets || 'engine_key_stream engine_diff_libhangul frontend_commit_protocol layout_yaml config_yaml' }}
           SECONDS_PER_TARGET: ${{ inputs.seconds_per_target || '900' }}
         run: |
           mkdir -p fuzz-logs
