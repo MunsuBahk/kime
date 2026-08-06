@@ -9,8 +9,26 @@ crate is excluded from the root workspace and carries its own lockfile.
 |---|---|
 | `engine_key_stream` | arbitrary key/op sequences against `InputEngine`: no panic, and the `HAS_COMMIT`/`HAS_PREEDIT` flags stay in sync with the commit and preedit buffers |
 | `engine_diff_libhangul` | the same dubeolsik syllables through kime and through libhangul (the composition engine behind ibus-hangul and fcitx5-hangul) must produce the same text — the engine-level guard for last-syllable (끝글자) bugs |
+| `frontend_commit_protocol` | a Rust mirror of the GTK immodule's commit/emit/reset protocol driving the real `InputEngine` against a hostile client that re-enters `reset()` from its commit and preedit handlers — every committed character must reach the client exactly once, in order |
 | `layout_yaml` | `Layout::load_from` never panics on arbitrary input |
 | `config_yaml` | `RawConfig` deserialization never panics on arbitrary input |
+
+`frontend_commit_protocol` fuzzes a hand transcription
+(`src/frontend.rs`) of `src/frontends/gtk3/src/immodule.c`
+(`process_input_result`, `kime_reset`, `commit`, `update_preedit`) — the
+protocol layer where the [#562] Firefox reset-in-commit-handler double
+commit lived, fixed in [#799] by snapshotting and clearing the engine
+buffer before emitting (the Qt frontend uses the same ordering). The
+hostile client may synchronously call `reset()` from any commit delivery
+or preedit signal, at any depth. Because it is a transcription and not the
+C code, it can drift: whenever the commit/reset ordering in `immodule.c`
+or `input_context.cc` changes, `src/frontend.rs` must be re-transcribed by
+hand. Triage rule: reproduce any finding with the e2e gtk/qt reset probes
+(`tests/e2e`: `g3_06`/`g3_07`, `q06`/`q07`) against the REAL frontends
+before filing.
+
+[#562]: https://github.com/Riey/kime/issues/562
+[#799]: https://github.com/Riey/kime/pull/799
 
 `engine_diff_libhangul` generates whole syllables (onset, vowel, optional
 second vowel, optional coda) rather than free key sequences. kime and

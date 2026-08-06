@@ -1,4 +1,5 @@
 pub mod diff;
+pub mod frontend;
 
 use arbitrary::Arbitrary;
 use kime_engine_config::{EngineConfig, HotkeyBehavior, InputCategory};
