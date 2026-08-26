@@ -288,12 +288,40 @@ impl Choseong {
 
     pub fn try_add(self, other: Self, addons: EnumSet<Addon>) -> Option<Self> {
         let compose_choseong_ssang = addons.contains(Addon::ComposeChoseongSsang);
+        let compose_choseong_sunahrae = addons.contains(Addon::ComposeChoseongSunahrae);
         match (self, other) {
             (Self::Giyeok, Self::Giyeok) if compose_choseong_ssang => Some(Self::SsangGiyeok),
             (Self::Bieup, Self::Bieup) if compose_choseong_ssang => Some(Self::SsangBieup),
             (Self::Siot, Self::Siot) if compose_choseong_ssang => Some(Self::SsangSiot),
             (Self::Jieut, Self::Jieut) if compose_choseong_ssang => Some(Self::SsangJieut),
             (Self::Digeut, Self::Digeut) if compose_choseong_ssang => Some(Self::SsangDigeut),
+            // 세벌식 순아래: 서로 다른 자음을 붙여 눌러 된소리 입력 (입력 순서 무관)
+            // ㄱ+ㅇ=ㄲ, ㅈ+ㄱ=ㅉ, ㅂ+ㅈ=ㅃ, ㄷ+ㅁ=ㄸ, ㅅ+ㅎ=ㅆ
+            (Self::Giyeok, Self::Ieung) | (Self::Ieung, Self::Giyeok)
+                if compose_choseong_sunahrae =>
+            {
+                Some(Self::SsangGiyeok)
+            }
+            (Self::Jieut, Self::Giyeok) | (Self::Giyeok, Self::Jieut)
+                if compose_choseong_sunahrae =>
+            {
+                Some(Self::SsangJieut)
+            }
+            (Self::Bieup, Self::Jieut) | (Self::Jieut, Self::Bieup)
+                if compose_choseong_sunahrae =>
+            {
+                Some(Self::SsangBieup)
+            }
+            (Self::Digeut, Self::Mieum) | (Self::Mieum, Self::Digeut)
+                if compose_choseong_sunahrae =>
+            {
+                Some(Self::SsangDigeut)
+            }
+            (Self::Siot, Self::Hieuh) | (Self::Hieuh, Self::Siot)
+                if compose_choseong_sunahrae =>
+            {
+                Some(Self::SsangSiot)
+            }
             _ => None,
         }
     }
@@ -316,6 +344,7 @@ impl Jungseong {
 
     pub fn try_add(self, other: Self, addons: EnumSet<Addon>) -> Option<Self> {
         let compose_jungseong_ssang = addons.contains(Addon::ComposeJungseongSsang);
+        let compose_jungseong_sunahrae = addons.contains(Addon::ComposeJungseongSunahrae);
         match (self, other) {
             // ㅑ ㅣ = ㅒ
             (Self::YA, Self::I) if compose_jungseong_ssang => Some(Self::YAE),
@@ -335,6 +364,18 @@ impl Jungseong {
             (Self::U, Self::I) => Some(Self::WI),
             // ㅡ ㅣ = ㅢ
             (Self::EU, Self::I) => Some(Self::YI),
+
+            // 세벌식 순아래: 조합용ㅗ/조합용ㅜ 키는 그냥 일반 ㅗ(O)/ㅜ(U)와 같은 값이고
+            // (391의 V/B 키와 동일), 여기에 추가 이중모음 조합 규칙만 덧붙인다.
+            // 조합용ㅗ+ㅓ=>ㅝ, 조합용ㅗ+ㅔ=>ㅞ, 조합용ㅗ+ㅡ=>ㅒ, 조합용ㅗ+ㅕ=>ㅖ, 조합용ㅗ+ㅗ=>ㅢ
+            (Self::O, Self::EO) if compose_jungseong_sunahrae => Some(Self::WEO),
+            (Self::O, Self::E) if compose_jungseong_sunahrae => Some(Self::WE),
+            (Self::O, Self::EU) if compose_jungseong_sunahrae => Some(Self::YAE),
+            (Self::O, Self::YEO) if compose_jungseong_sunahrae => Some(Self::YE),
+            (Self::O, Self::O) if compose_jungseong_sunahrae => Some(Self::YI),
+            // 조합용ㅜ+ㅏ=>ㅘ, 조합용ㅜ+ㅐ=>ㅙ
+            (Self::U, Self::A) if compose_jungseong_sunahrae => Some(Self::WA),
+            (Self::U, Self::AE) if compose_jungseong_sunahrae => Some(Self::WAE),
             _ => None,
         }
     }

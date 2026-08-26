@@ -1,0 +1,115 @@
+# 세벌식 최종 순아래 (youknowone 님 설계, https://text.youknowone.org/post/106848470561/3final-noshift)
+#
+# 자음/모음 기본 배치는 세벌식 최종(391)과 동일하다. 391과 다른 부분:
+#   - `9`/`Slash` 키(조합용ㅜ/조합용ㅗ): 391과 마찬가지로 그냥 ㅜ/ㅗ 값을 쓴다(단독 입력 시
+#     ㅟ/ㅚ로 바뀌는 기능은 쓰지 않음). 대신 엔진의 ComposeJungseongSunahrae 애드온이
+#     일반 ㅗ/ㅜ에 추가 이중모음 조합 규칙을 덧붙인다 (characters.rs 참고).
+#   - 된소리(ㄲㄸㅃㅆㅉ): Shift 없이 서로 다른 자음을 붙여 눌러 조합한다
+#     (엔진의 ComposeChoseongSunahrae 애드온, characters.rs 참고)
+#   - 겹받침: `[` 키가 "다음 키를 Shift로 취급"하는 방식으로 391의 기존 Shift 조합값을
+#     그대로 재사용한다 (엔진의 SunahraeContextKeys 애드온, lib.rs의 press_key 참고).
+#     따라서 아래의 S-1, S-2, S-Q ... 겹받침용 Shift 조합은 391과 동일하게 유지해야 한다.
+#   - `/`와 `[` 키 자체는 초성이 없을 때(한글 조합 중이 아닐 때) 리터럴 문자를 출력하도록
+#     엔진 코드에서 분기한다 (레이아웃 파일에는 별도 표시 없음).
+#
+# 기호는 표준 QWERTY 위치를 그대로 쓴다. SemiColon/Quote 물리 키는 이미 ㅂ/ㅌ로 쓰이고
+# 있어서 ; : ' 세 기호만 다른 자리로 옮겨진다 (실제 배열 다이어그램 기준으로 확정).
+
+1: $ㅎ
+S-1: $ㄲ
+2: $ㅆ
+S-2: $ㄺ
+3: $ㅂ
+S-3: $ㅈ
+S-4: $ㄿ
+S-5: $ㄾ
+Q: $ㅅ
+S-Q: $ㅍ
+W: $ㄹ
+S-W: $ㅌ
+S-E: $ㄵ
+S-R: $ㅀ
+S-T: $ㄽ
+A: $ㅇ
+S-A: $ㄷ
+S: $ㄴ
+S-S: $ㄶ
+S-D: $ㄼ
+S-F: $ㄻ
+Z: $ㅁ
+S-Z: $ㅊ
+X: $ㄱ
+S-X: $ㅄ
+S-C: $ㅋ
+S-V: $ㄳ
+
+4: $ㅛ
+5: $ㅠ
+6: ㅑ
+7: $ㅖ
+8: $ㅢ
+9: ㅜ
+Slash: ㅗ
+E: ㅕ
+R: $ㅐ
+T: $ㅓ
+D: $ㅣ
+F: $ㅏ
+G: ㅡ
+S-G: $ㅒ
+C: $ㅔ
+V: ㅗ
+B: ㅜ
+
+0: ㅋ
+Y: ㄹ
+U: ㄷ
+I: ㅁ
+O: ㅊ
+P: ㅍ
+H: ㄴ
+J: ㅇ
+K: ㄱ
+L: ㅈ
+SemiColon: ㅂ
+Quote: ㅌ
+N: ㅅ
+M: ㅎ
+
+# 기호는 표준 QWERTY 위치를 그대로 따른다 (`;`, `:`, `'`만 예외 — 아래 참고).
+Grave: '`'
+S-Grave: '~'
+S-6: '^'
+S-7: '&'
+S-8: '*'
+S-9: '('
+S-0: ')'
+Minus: '-'
+S-Minus: _
+Equal: '='
+S-Equal: '+'
+OpenBracket: '['
+S-OpenBracket: '{'
+CloseBracket: ']'
+S-CloseBracket: '}'
+Backslash: \
+S-Backslash: '|'
+# ; : ' 는 SemiColon/Quote 물리 키가 ㅂ/ㅌ로 이미 쓰이고 있어서 QWERTY 위치에 못 들어가고,
+# 대신 다음 키들로 옮겨졌다 (실제 배열 다이어그램 기준).
+S-B: ;
+S-N: ':'
+S-M: "'"
+S-Comma: '<'
+S-Period: '>'
+S-Slash: '?'
+
+S-Y: 5
+S-U: 6
+S-I: 7
+S-O: 8
+S-P: 9
+S-H: 0
+S-J: 1
+S-K: 2
+S-L: 3
+S-SemiColon: 4

@@ -12,6 +12,8 @@ pub struct HangulEngine {
     word_commit: bool,
     preedit_johab: PreeditJohabLevel,
     word_buf: String,
+    /// 세벌식 순아래: `[`가 예약해둔 "다음 키를 Shift로 취급" 플래그
+    pending_shift: bool,
 }
 
 impl HangulEngine {
@@ -21,11 +23,27 @@ impl HangulEngine {
             word_commit,
             preedit_johab,
             word_buf: String::new(),
+            pending_shift: false,
         }
     }
 
     pub fn has_preedit(&self) -> bool {
         self.state.need_display() || !self.word_buf.is_empty()
+    }
+
+    /// 세벌식 순아래: 현재 조합 중인 글자에 초성이 있는지 (문맥 의존 키에서 사용)
+    pub fn has_choseong(&self) -> bool {
+        self.state.cho.is_some()
+    }
+
+    /// 세벌식 순아래: `[`가 다음 키를 Shift로 취급하도록 예약한다.
+    pub fn set_pending_shift(&mut self) {
+        self.pending_shift = true;
+    }
+
+    /// 예약된 pending_shift를 소비하고(한 번만 적용) 초기화한다.
+    pub fn take_pending_shift(&mut self) -> bool {
+        std::mem::take(&mut self.pending_shift)
     }
 
     pub fn preedit_str(&self, buf: &mut String) {
@@ -38,11 +56,13 @@ impl HangulEngine {
         self.word_buf.clear();
         self.state.commit(commit_buf);
         self.state.reset();
+        self.pending_shift = false;
     }
 
     pub fn reset(&mut self) {
         self.word_buf.clear();
         self.state.reset();
+        self.pending_shift = false;
     }
 
     fn convert_result(&mut self, ret: CharacterResult, commit_buf: &mut String) -> bool {
