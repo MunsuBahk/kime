@@ -5,7 +5,7 @@ mod state;
 use std::{borrow::Cow, collections::BTreeMap};
 
 use enumset::{EnumSet, EnumSetType};
-use kime_engine_backend::{InputEngineBackend, Key, KeyCode, ModifierState};
+use kime_engine_backend::{InputEngineBackend, Key, KeyCode};
 use serde::{Deserialize, Serialize};
 
 pub use layout::{Layout, LayoutError, LAYOUT_FORMAT_VERSION};
@@ -194,13 +194,15 @@ impl InputEngineBackend for HangulEngine {
     type ConfigData = HangulData;
 
     fn press_key(&mut self, config: &HangulData, key: Key, commit_buf: &mut String) -> bool {
-        // 세벌식 순아래: `[` 뒤에 예약해둔 "다음 키를 Shift로 취급"을 여기서 소비한다.
-        // Backspace를 포함한 모든 키에 적용해, 눌리지 않고 남는 일이 없게 한다.
-        let key = if self.take_pending_shift() {
-            Key::new(key.code, key.state | ModifierState::SHIFT)
-        } else {
-            key
-        };
+        // 세벌식 순아래: `[` 뒤에 예약해둔 종성 조합을 여기서 소비한다. 391의 Shift 슬롯과는
+        // 독립된 별도 테이블(sunahrae_bracket_jongseong)을 쓰기 때문에, 진짜 Shift+숫자는
+        // 겹받침에 안 뺏기고 일반 기호(!@#$% 등)로 자유롭게 쓸 수 있다.
+        if self.take_pending_shift() {
+            if let Some(kv) = sunahrae_bracket_jongseong(key.code) {
+                return self.key(kv, config.addons, commit_buf);
+            }
+            // 매핑에 없는 키가 오면 예약만 조용히 소비하고, 그 키 자체는 평소대로 처리한다.
+        }
 
         if key.code == KeyCode::Backspace {
             return self.backspace(config.addons, commit_buf);
@@ -221,8 +223,8 @@ impl InputEngineBackend for HangulEngine {
                     return true;
                 }
                 KeyCode::OpenBracket => {
-                    // 초성이 있는 채로 `[`가 눌리면: 다음 키를 Shift로 취급하도록 예약만 하고
-                    // 화면에는 아무것도 찍지 않는다 (391의 Shift 자리 값을 그대로 재사용).
+                    // 초성이 있는 채로 `[`가 눌리면: 다음 키의 종성 조합값을 예약만 하고
+                    // 화면에는 아무것도 찍지 않는다.
                     self.set_pending_shift();
                     return true;
                 }
@@ -255,6 +257,40 @@ impl InputEngineBackend for HangulEngine {
     fn preedit_str(&self, buf: &mut String) {
         self.preedit_str(buf);
     }
+}
+
+/// 세벌식 순아래: `[`(종성조합글쇠) 다음에 눌리는 후보 키 → 겹받침/특수 종성 값.
+/// 391의 Shift 슬롯을 그대로 재사용하지 않는 독립 테이블이라, 실제 Shift+숫자/자모 키는
+/// 이 표와 무관하게 다른 값(예: 일반 기호)으로 자유롭게 쓸 수 있다.
+/// (원 배열 문서 기준: https://text.youknowone.org/post/106848470561/3final-noshift)
+fn sunahrae_bracket_jongseong(code: KeyCode) -> Option<characters::KeyValue> {
+    use characters::{Jongseong::*, KeyValue};
+
+    let jong = match code {
+        // 자음 줄: ㅎ+[=ㄲ, ㅆ+[=ㄺ, ㅂ+[=ㅈ, ㅅ+[=ㅍ, ㄹ+[=ㅌ, ㅇ+[=ㄷ, ㄴ+[=ㄶ, ㅁ+[=ㅊ, ㄱ+[=ㅄ
+        KeyCode::One => SsangGiyeok,
+        KeyCode::Two => RieulGiyeok,
+        KeyCode::Three => Jieut,
+        KeyCode::Q => Pieup,
+        KeyCode::W => Tieut,
+        KeyCode::A => Digeut,
+        KeyCode::S => NieunHieuh,
+        KeyCode::Z => Chieut,
+        KeyCode::X => BieupSiot,
+        // 모음 줄: ㅛ+[=ㄿ, ㅠ+[=ㄾ, ㅕ+[=ㄵ, ㅐ+[=ㅀ, ㅓ+[=ㄽ, ㅣ+[=ㄼ, ㅏ+[=ㄻ, ㅔ+[=ㅋ, ㅗ+[=ㄳ
+        KeyCode::Four => RieulPieup,
+        KeyCode::Five => RieulTieut,
+        KeyCode::E => NieunJieut,
+        KeyCode::R => RieulHieuh,
+        KeyCode::T => RieulSiot,
+        KeyCode::D => RieulBieup,
+        KeyCode::F => RieulMieum,
+        KeyCode::C => Kieuk,
+        KeyCode::V => GiyeokSiot,
+        _ => return None,
+    };
+
+    Some(KeyValue::Jongseong { jong })
 }
 
 pub fn builtin_layouts() -> impl Iterator<Item = (Cow<'static, str>, Layout)> {
