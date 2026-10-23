@@ -1,5 +1,20 @@
 # kime
 
+## 세벌식 최종 순아래 포크
+
+이 저장소의 `sunahrae` 브랜치는 [Riey/kime](https://github.com/Riey/kime)에 세벌식 최종 순아래 입력을 추가한 사용자 수정본이다.
+
+- 된소리·추가 이중모음 조합, `[`를 먼저 누르는 겹받침 입력 지원
+- 실제 Shift+숫자는 표준 QWERTY 기호 유지
+- `develop`: 원본 동기화용 / `sunahrae`: 사용자 수정본
+- [빌드·설치·업데이트와 구현 제약](docs/sunahrae.md)
+- 원본 릴리스 패키지에는 사용자 수정이 포함되지 않는다.
+
+아래는 원본 프로젝트의 안내이다.
+
+---
+
+
 [<img src="./docs/assets/kime-roundy-default-without-text-bluegrey.png" height="100">](https://github.com/Riey/kime)
 
 Korean IME
