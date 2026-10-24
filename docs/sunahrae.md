@@ -18,21 +18,22 @@
 - `develop`: 원본 프로젝트의 변경사항을 추적하는 브랜치
 - `sunahrae`: 순아래 수정사항을 포함한 빌드 대상 브랜치
 
-Git 원격 저장소의 이름(`origin`, `upstream` 등)은 클론 환경에 따라 달라질 수 있으므로 `git remote -v`로 확인한다.
+아래 예시는 **이 Fork를 클론해 `origin`이 자신의 Fork를 가리키는 환경**을 기준으로 한다. 원본 `Riey/kime`은 `upstream`으로 등록한다. 다른 방식으로 클론했다면 `git remote -v`로 실제 원격 저장소를 확인하고 명령을 조정한다.
 
 원본 프로젝트의 변경사항을 동기화하더라도 `sunahrae` 브랜치와 이미 설치된 입력기는 자동으로 갱신되지 않는다. 변경사항을 해당 브랜치에 반영한 뒤 다시 빌드하고 설치해야 한다.
 
-아래 명령은 fish 기준이다. 미커밋 변경을 보존한 뒤 working tree가 깨끗할 때 진행한다.
+아래 명령은 fish 기준이다. 미커밋 변경을 보존한 뒤 working tree가 깨끗할 때 진행한다. `git remote add upstream`은 **upstream이 아직 없을 때만** 실행한다.
 
 ```fish
-cd ~/kime-sunahrae-patch/kime-src
+cd /path/to/kime  # 실제 클론 디렉터리 경로로 변경
 git status --short --branch
 git remote -v
-git fetch origin
-git fetch fork
+# upstream이 등록되지 않았다면 최초 1회 실행:
+git remote add upstream https://github.com/Riey/kime.git
+git fetch upstream
 git switch sunahrae
 git branch backup/sunahrae-(date +%Y%m%d-%H%M%S)
-git merge origin/develop
+git merge upstream/develop
 ```
 
 충돌 시 해결 후 검증하거나 `git merge --abort`로 취소한다. 공유 이력을 재작성하지 않는다. v3.2.0 태그는 최초 패치 기반 09ed7a2보다 오래되어 재적용 대상으로 사용하지 않는다.
@@ -57,7 +58,7 @@ build가 이미 구성돼 있으면 setup 대신 `meson setup --reconfigure buil
 기존 패키지를 보존하도록 별도 출력 폴더를 사용한다.
 
 ```fish
-set package_dir ~/kime-sunahrae-patch/out/(date +%Y%m%d-%H%M%S)
+set package_dir (pwd)/out/(date +%Y%m%d-%H%M%S)
 mkdir -p $package_dir
 bash packaging/build-deb.sh build $package_dir
 set package_file $package_dir/kime_(string trim < VERSION)_(dpkg --print-architecture).deb
@@ -82,8 +83,8 @@ sudo 비밀번호는 터미널에 직접 입력한다. 설치 후 작업을 저�
 수정 파일만 스테이징·커밋한 뒤 일반 push를 사용한다.
 
 ```fish
-git push fork sunahrae
-git diff --binary origin/develop...sunahrae -- src/engine/backends/hangul > ../sunahrae-engine.patch
+git push origin sunahrae
+git diff --binary upstream/develop...sunahrae -- src/engine/backends/hangul > ../sunahrae-engine.patch
 ```
 
 패치는 `git apply`용 diff이다. 적용 대상에서 먼저 `git apply --check`로 검사한다.
