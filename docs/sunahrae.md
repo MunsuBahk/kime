@@ -13,7 +13,14 @@
 
 ## 원본 변경 통합
 
-mano의 기존 클론은 `origin`=Riey/kime, `fork`=MunsuBahk/kime이다. 다른 클론에서는 원격 이름을 먼저 확인한다. develop은 원본 추적, sunahrae는 실제 빌드 대상이다. develop의 Sync fork만으로 수정본과 설치된 입력기가 갱신되지는 않는다.
+이 저장소는 `Riey/kime`을 기반으로 한 Fork이며, `sunahrae` 브랜치에서 순아래 입력기 관련 수정사항을 관리한다.
+
+- `develop`: 원본 프로젝트의 변경사항을 추적하는 브랜치
+- `sunahrae`: 순아래 수정사항을 포함한 빌드 대상 브랜치
+
+Git 원격 저장소의 이름(`origin`, `upstream` 등)은 클론 환경에 따라 달라질 수 있으므로 `git remote -v`로 확인한다.
+
+원본 프로젝트의 변경사항을 동기화하더라도 `sunahrae` 브랜치와 이미 설치된 입력기는 자동으로 갱신되지 않는다. 변경사항을 해당 브랜치에 반영한 뒤 다시 빌드하고 설치해야 한다.
 
 아래 명령은 fish 기준이다. 미커밋 변경을 보존한 뒤 working tree가 깨끗할 때 진행한다.
 
